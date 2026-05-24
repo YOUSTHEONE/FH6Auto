@@ -326,6 +326,7 @@ class FH_UltimateBot(ctk.CTk):
             "base_width": 2560,
             "auto_restart": False,
             "restart_cmd": "start steam://run/2483190",
+            "cj_car_right_offset": 0,
         }
         self.load_config()
 
@@ -436,6 +437,13 @@ class FH_UltimateBot(ctk.CTk):
         self.config["auto_restart"] = self.var_auto_restart.get()
         self.config["restart_cmd"] = self.le_restart_cmd.get().strip()
 
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, indent=4, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def save_runtime_config(self):
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(self.config, f, indent=4, ensure_ascii=False)
@@ -1577,8 +1585,9 @@ class FH_UltimateBot(ctk.CTk):
 
             scales_to_try = self.get_scales_to_try(fast_mode=fast_mode)
 
-            best_score = 0.0
-            best_pos = None
+            best_main_score = 0.0
+            best_tag_score = 0.0
+            best_final_score = 0.0
 
             for scale in scales_to_try:
                 main_tpl_c, _ = self.get_scaled_template(main_path, scale)
@@ -1599,6 +1608,9 @@ class FH_UltimateBot(ctk.CTk):
                 # 用彩色主模板先找候选，但阈值放低一点，后面再综合筛
                 res_main = cv2.matchTemplate(screen_bgr, main_tpl_c, cv2.TM_CCOEFF_NORMED)
                 loc = np.where(res_main >= main_threshold)
+                scale_best_main = cv2.minMaxLoc(res_main)[1]
+                if scale_best_main > best_main_score:
+                    best_main_score = scale_best_main
 
                 checked_points = set()
 
@@ -1634,29 +1646,38 @@ class FH_UltimateBot(ctk.CTk):
                         max(0, x - pad):min(screen_bgr.shape[1], x + w_m + pad),
                     ]
                     like_score = self.match_template_score(sub_roi, sub_tpl_c)
+                    if like_score > best_tag_score:
+                        best_tag_score = like_score
 
-                    if like_score < like_threshold:
-                        continue
-
-                    final_score = (
+                    partial_score = (
                         color_score * 0.30 +
                         gray_score * 0.20 +
                         edge_score * 0.20 +
                         center_score * 0.15 +
                         like_score * 0.15
                     )
+                    if partial_score > best_final_score:
+                        best_final_score = partial_score
+
+                    if like_score < like_threshold:
+                        continue
+
+                    final_score = partial_score
 
                     if final_score >= final_threshold:
+                        self.log(
+                            f"[multi_match] 命中 {main_path}+{sub_path}: "
+                            f"main={color_score:.3f}, tag={like_score:.3f}, final={final_score:.3f}"
+                        )
                         return (
                             x + w_m // 2 + (region[0] if region else 0),
                             y + h_m // 2 + (region[1] if region else 0),
                         )
 
-            if best_score >= final_threshold:
-                self.log(f"[multi_match] 命中 {main_path} 最终分数: {best_score:.3f}")
-                return best_pos
-
-            self.log(f"[multi_match] 未命中 {main_path}，最高分仅: {best_score:.3f}")
+            self.log(
+                f"[multi_match] 未命中 {main_path}+{sub_path}: "
+                f"main={best_main_score:.3f}, tag={best_tag_score:.3f}, final={best_final_score:.3f}"
+            )
             return None
 
         except Exception as e:
@@ -2353,27 +2374,40 @@ class FH_UltimateBot(ctk.CTk):
             self.log("未找到购买与出售")
             return False
 
-        self.game_click(pos_bs)
-        time.sleep(1.0)
-        self.hw_press("pagedown", delay=0.15)
-        time.sleep(0.5)
+        self.log("确认进入车辆菜单，准备从设计与喷漆选择车辆。")
 
         while self.cj_counter < target_count:
             if not self.is_running:
                 return False
 
-            for _ in range(2):
-                self.hw_press("down", delay=0.15)
-                time.sleep(0.4)
+            pos_design = None
+            for i in range(12):
+                if not self.is_running:
+                    return False
 
-            self.hw_press("enter")
-            time.sleep(1.0)
-            self.hw_press("enter")
-            time.sleep(1.0)
+                pos_design = self.wait_for_any_image(
+                    ["designandpaint_w.png", "designandpaint-b.png"],
+                    region=self.regions["全界面"],
+                    threshold=0.75,
+                    timeout=0.8,
+                    interval=0.2,
+                    fast_mode=True
+                )
+                if pos_design:
+                    break
+
+                self.hw_press("right" if i < 6 else "left", delay=0.15)
+                time.sleep(0.3)
+
+            if not pos_design:
+                self.log("未找到设计与喷漆")
+                return False
+
+            self.game_click(pos_design)
 
             pos = self.wait_for_image(
                 "DSI.png",
-                region=self.regions["左"],
+                region=self.regions["全界面"],
                 threshold=0.75,
                 timeout=2.5,
                 interval=0.4,
@@ -2384,11 +2418,11 @@ class FH_UltimateBot(ctk.CTk):
                 self.game_click(pos)
                 time.sleep(0.8)
 
-            pos = self.wait_for_image(
-                "choosecar.png",
-                region=self.regions["左"],
+            pos = self.wait_for_any_image(
+                ["choosecar.png", "choosecar-b.png"],
+                region=self.regions["全界面"],
                 threshold=0.75,
-                timeout=8,
+                timeout=10,
                 interval=0.3,
                 fast_mode=True
             )
@@ -2397,10 +2431,9 @@ class FH_UltimateBot(ctk.CTk):
                 return False
 
             self.game_click(pos)
-            time.sleep(0.8)
 
             self.hw_press("backspace")
-            time.sleep(1.0)
+            time.sleep(0.4)
 
             brand_pos = None
             for _ in range(30):
@@ -2422,13 +2455,29 @@ class FH_UltimateBot(ctk.CTk):
                 time.sleep(0.25)
 
             if not brand_pos:
-                self.log("选品牌失败")
+                self.log("未找到斯巴鲁品牌")
                 return False
 
             self.game_click(brand_pos)
-            time.sleep(1.0)
+            time.sleep(0.4)
+
+            try:
+                car_right_offset = int(self.config.get("cj_car_right_offset", 0))
+            except Exception:
+                car_right_offset = 0
+            car_right_offset = max(0, min(200, car_right_offset))
+
+            if car_right_offset:
+                self.log(f"按已记录偏移跳过车辆: right x {car_right_offset}")
+                for _ in range(car_right_offset):
+                    if not self.is_running:
+                        return False
+                    self.hw_press("right", delay=0.05)
+                    time.sleep(0.08)
+                time.sleep(0.35)
 
             found_car = False
+            current_right_offset = car_right_offset
             for _ in range(85):
                 if not self.is_running:
                     return False
@@ -2440,22 +2489,30 @@ class FH_UltimateBot(ctk.CTk):
                     fast_mode=False,
                     main_threshold=0.60,
                     like_threshold=0.70,
-                    final_threshold=0.70,
-                    timeout=10,
+                    final_threshold=0.68,
+                    timeout=3,
                     interval=0.25
                 )
                 if pos_target:
+                    self.hw_key_up("right")
                     self.game_click(pos_target)
                     found_car = True
+                    if self.config.get("cj_car_right_offset", 0) != current_right_offset:
+                        self.config["cj_car_right_offset"] = current_right_offset
+                        self.save_runtime_config()
+                        self.log(f"记录首次目标车辆偏移: right x {current_right_offset}")
                     break
 
                 for _ in range(4):
+                    if not self.is_running:
+                        return False
                     self.hw_press("right", delay=0.05)
                     time.sleep(0.08)
-                time.sleep(0.4)
+                current_right_offset += 4
+                time.sleep(0.35)
 
             if not found_car:
-                self.log("列表中未找到目标车辆")
+                self.log("列表中未找到带全新标签的目标车辆")
                 return False
             time.sleep(0.5)
             self.hw_press("enter")
@@ -2463,7 +2520,7 @@ class FH_UltimateBot(ctk.CTk):
 
             pos = self.wait_for_any_image(
                 ["choosecar.png", "choosecar-b.png"],
-                region=self.regions["左下"],
+                region=self.regions["全界面"],
                 threshold=0.75,
                 timeout=15,
                 interval=0.5,
@@ -2473,17 +2530,17 @@ class FH_UltimateBot(ctk.CTk):
                 self.hw_press("esc")
                 time.sleep(0.8)
             else:
-                self.log("未退出到设计与喷涂")
+                self.log("选车后未返回设计与喷漆")
                 return False
 
             pos_sjy = None
-            for _ in range(60):
+            for i in range(30):
                 if not self.is_running:
                     return False
 
                 pos_sjy = self.wait_for_any_image(
                     ["UandT-w.png", "UandT-b.png"],
-                    region=self.regions["左下"],
+                    region=self.regions["全界面"],
                     threshold=0.75,
                     timeout=0.8,
                     interval=0.2,
@@ -2492,11 +2549,11 @@ class FH_UltimateBot(ctk.CTk):
                 if pos_sjy:
                     break
 
-                self.hw_press("esc")
-                time.sleep(0.5)
+                self.hw_press("right" if i < 15 else "left", delay=0.15)
+                time.sleep(0.3)
 
             if not pos_sjy:
-                self.log("找不到升级页面")
+                self.log("找不到升级与调教")
                 return False
 
             self.game_click(pos_sjy)
@@ -2555,13 +2612,15 @@ class FH_UltimateBot(ctk.CTk):
                     return True
 
                 self.cj_counter += 1
+                if self.cj_counter % 3 == 0:
+                    self.config["cj_car_right_offset"] = int(self.config.get("cj_car_right_offset", 0)) + 1
+                    self.save_runtime_config()
+                    self.log(f"已升级 3 辆同列车辆，车辆偏移更新为: right x {self.config['cj_car_right_offset']}")
                 self.update_running_ui("超级抽奖", self.cj_counter, target_count)
 
             self.hw_press("esc")
             time.sleep(1.2)
             self.hw_press("esc")
-            time.sleep(0.8)
-            self.hw_press("up", delay=0.15)
             time.sleep(0.8)
 
         return True
