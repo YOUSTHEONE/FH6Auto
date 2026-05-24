@@ -2310,6 +2310,52 @@ class FH_UltimateBot(ctk.CTk):
     # ==========================================
     # --- 模块：抽奖 ---
     # ==========================================
+    def enter_design_paint_choose_car(self):
+        design_paint_images = ["designpaint-w.png", "designpaint-b.png"]
+        choose_owned_car_images = ["chooseownedcar-w.png", "chooseownedcar-b.png"]
+
+        pos_design_paint = None
+        for _ in range(8):
+            if not self.is_running:
+                return False
+
+            pos_design_paint = self.wait_for_any_image(
+                design_paint_images,
+                region=self.regions["全界面"],
+                threshold=0.70,
+                timeout=0.8,
+                interval=0.2,
+                fast_mode=False
+            )
+            if pos_design_paint:
+                break
+
+            self.hw_press("down", delay=0.15)
+            time.sleep(0.35)
+
+        if not pos_design_paint:
+            self.log("未识别到 设计与喷漆")
+            return False
+
+        self.game_click(pos_design_paint)
+        time.sleep(1.2)
+
+        pos_choose_car = self.wait_for_any_image(
+            choose_owned_car_images,
+            region=self.regions["全界面"],
+            threshold=0.70,
+            timeout=12,
+            interval=0.3,
+            fast_mode=False
+        )
+        if not pos_choose_car:
+            self.log("未识别到 设计与喷漆内的选择车辆")
+            return False
+
+        self.game_click(pos_choose_car)
+        time.sleep(0.8)
+        return True
+
     def logic_super_wheelspin(self, target_count):
         if self.cj_counter >= target_count:
             return True
@@ -2362,42 +2408,8 @@ class FH_UltimateBot(ctk.CTk):
             if not self.is_running:
                 return False
 
-            for _ in range(2):
-                self.hw_press("down", delay=0.15)
-                time.sleep(0.4)
-
-            self.hw_press("enter")
-            time.sleep(1.0)
-            self.hw_press("enter")
-            time.sleep(1.0)
-
-            pos = self.wait_for_image(
-                "DSI.png",
-                region=self.regions["左"],
-                threshold=0.75,
-                timeout=2.5,
-                interval=0.4,
-                fast_mode=True
-            )
-            if pos:
-                self.log("识别到 不要显示该消息，点击...")
-                self.game_click(pos)
-                time.sleep(0.8)
-
-            pos = self.wait_for_image(
-                "choosecar.png",
-                region=self.regions["左"],
-                threshold=0.75,
-                timeout=8,
-                interval=0.3,
-                fast_mode=True
-            )
-            if not pos:
-                self.log("未识别到 选择车辆")
+            if not self.enter_design_paint_choose_car():
                 return False
-
-            self.game_click(pos)
-            time.sleep(0.8)
 
             self.hw_press("backspace")
             time.sleep(1.0)
