@@ -1730,9 +1730,18 @@ class FH_UltimateBot(ctk.CTk):
         self.hw_press("pagedown", delay=0.15)
         time.sleep(0.5)
 
+        def mark_car_processed(reason=""):
+            if reason:
+                self.log(reason)
+            self.cj_counter += 1
+            self.log(f"超级抽奖计数 +1：{self.cj_counter} / {target_count}")
+            self.update_running_ui("超级抽奖", self.cj_counter, target_count)
+
         while self.cj_counter < target_count:
             if not self.is_running:
                 return False
+
+            self.log(f"开始寻找第 {self.cj_counter + 1} / {target_count} 辆新车")
 
             self.hw_press("enter")
             time.sleep(1.0)
@@ -1753,6 +1762,7 @@ class FH_UltimateBot(ctk.CTk):
                 self.log("选品牌失败")
                 return False
 
+            self.log("已找到目标品牌，进入品牌车辆列表")
             self.game_click(brand_pos)
             time.sleep(1)
 
@@ -1760,18 +1770,21 @@ class FH_UltimateBot(ctk.CTk):
             for _ in range(85):
                 if not self.is_running:
                     return False
+
                 p_car = self.find_image_with_element("newCC.png", "newcartag.png", threshold=0.85)
                 if p_car:
+                    self.log(f"已找到第 {self.cj_counter + 1} 辆新车，准备进入车辆")
                     self.game_click(p_car)
                     found_car = True
                     break
+
                 for _ in range(4):
                     self.hw_press("right", delay=0.05)
                     time.sleep(0.08)
                 time.sleep(0.6)
 
             if not found_car:
-                self.log("列表中未找到目标车辆")
+                self.log(f"列表中未找到目标车辆，当前计数：{self.cj_counter} / {target_count}")
                 return False
 
             time.sleep(0.5)
@@ -1779,6 +1792,11 @@ class FH_UltimateBot(ctk.CTk):
             time.sleep(0.5)
             self.hw_press("enter")
             time.sleep(3)
+
+            # 关键改动：
+            # 到这里车辆已经被进入过，new tag 会消失。
+            # 所以这里立刻计数，避免后面加点失败导致计数少于实际消耗车辆数。
+            mark_car_processed("已进入车辆，new tag 已消失，本车辆按已处理计数。")
 
             pos_sjy = None
             for _ in range(60):
@@ -1791,9 +1809,10 @@ class FH_UltimateBot(ctk.CTk):
                     break
 
             if not pos_sjy:
-                self.log("找不到升级页面")
-                return False
+                self.log("已计数，但找不到升级页面，跳过本车辆继续下一辆。")
+                continue
 
+            self.log("找到升级页面，准备进入熟练度")
             self.hw_press("down")
             time.sleep(0.3)
             self.hw_press("enter")
@@ -1809,9 +1828,10 @@ class FH_UltimateBot(ctk.CTk):
                 time.sleep(1)
 
             if not pos_cls:
-                self.log("找不到熟练度入口")
-                return False
+                self.log("已计数，但找不到熟练度入口，跳过本车辆继续下一辆。")
+                continue
 
+            self.log("找到熟练度入口，准备加点")
             self.game_click(pos_cls)
             time.sleep(1.5)
             self.hw_press("enter")
@@ -1820,12 +1840,14 @@ class FH_UltimateBot(ctk.CTk):
             for dk in self.config["skill_dirs"]:
                 if not self.is_running:
                     return False
+                self.log(f"执行技能方向：{dk}")
                 self.hw_press(dk)
                 time.sleep(0.2)
                 self.hw_press("enter")
                 time.sleep(1.5)
+
             if self.find_image("SPNE.png", region=self.regions["全界面"], threshold=0.7):
-                self.log("已无技能点或技能已点完。")
+                self.log("已无技能点或技能已点完。本车辆已提前计数，准备返回列表。")
                 time.sleep(1.0)
                 self.hw_press("enter")
                 time.sleep(0.8)
@@ -1835,18 +1857,15 @@ class FH_UltimateBot(ctk.CTk):
                 time.sleep(1.0)
                 self.hw_press("esc")
                 time.sleep(1.0)
-                return True
-                
+                continue
 
+            self.log("技能点击流程完成，准备返回车辆列表")
             self.hw_press("esc")
             time.sleep(1.5)
             self.hw_press("esc")
             time.sleep(0.8)
             self.hw_press("up", delay=0.15)
             time.sleep(1)
-
-            self.cj_counter += 1
-            self.update_running_ui("超级抽奖", self.cj_counter, target_count)
 
         return True
 
