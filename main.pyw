@@ -339,7 +339,7 @@ class FH_UltimateBot(ctk.CTk):
         self.log("   请认真阅读以下内容   ")
         self.log("游戏难度设置为 自动转向 自动挡")
         self.log("默认刷图车辆：【斯巴鲁Impreza 22B-STi Version】【调校S2  900】【保持默认涂装】【收藏车辆】")
-        self.log("刷点蓝图若使用503944655,请把换挡设置为手动档且在控制里把升档改为键位1,调教使用代码158607686,但仍有小概率跑偏")
+        self.log("刷点蓝图若使用503944655,请把档位改为手动,可使用本人调教代码158607686,目前测试未出现偏移")
         self.log("为减少识图误差,建议把非22B外的所有斯巴鲁的车改涂装颜色为白色")
         self.log("大部分以图像识别作为引导，减少机器盲目操作的风险，但仍无法完全避免，使用前请做好准备")
         self.log("删车识别图像为images文件夹内D.png")
@@ -2598,10 +2598,8 @@ class FH_UltimateBot(ctk.CTk):
                 elap = time.time() - start_w
 
                 if elap >= 3.0 and e_pressed == 0:
-                    self.hw_press("1")
                     e_pressed = 1
                 elif elap >= 5.0 and e_pressed == 1:
-                    self.hw_press("1")
                     e_pressed = 2
 
                 if time.time() - last_chk >= 1.0:
