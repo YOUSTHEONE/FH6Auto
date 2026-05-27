@@ -53,8 +53,15 @@ class WheelspinStageStaticTests(unittest.TestCase):
             with self.subTest(filename=filename):
                 self.assertIn(filename, self.source)
 
-    def test_spin_stage_presses_enter_quickly_and_returns_to_anchor_area(self):
-        self.assertIn("time.sleep(0.1)", self.source)
+    def test_spin_stage_spams_enter_after_click_until_exit_images(self):
+        self.assertRegex(
+            self.source,
+            r"self\.game_click\(pos_spin\)\s+self\.hw_press\(\"enter\", delay=0\.02\)\s+time\.sleep\(0\.5\)",
+        )
+        self.assertRegex(
+            self.source,
+            r"self\.hw_press\(\"enter\", delay=0\.02\)\s+time\.sleep\(0\.5\)",
+        )
         self.assertIn("for attempt in range(500):", self.source)
         self.assertGreaterEqual(len(re.findall(r'self\.hw_press\("pagedown"\)', self.source)), 3)
         self.assertIn('self.hw_press("pageup")', self.source)

@@ -3240,6 +3240,7 @@ class FH_UltimateBot(ctk.CTk):
 
             self.log(f"开始{log_name} ({attempt + 1})")
             self.game_click(pos_spin)
+            self.hw_press("enter", delay=0.02)
             time.sleep(0.5)
 
             empty_seen = False
@@ -3257,7 +3258,7 @@ class FH_UltimateBot(ctk.CTk):
                     break
 
                 self.hw_press("enter", delay=0.02)
-                time.sleep(0.1)
+                time.sleep(0.5)
 
             if not empty_seen and not menu_seen:
                 self.log(f"{log_name}等待结果超时")
