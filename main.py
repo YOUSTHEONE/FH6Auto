@@ -271,7 +271,7 @@ class FH_UltimateBot(ctk.CTk):
         super().__init__()
         #窗口相关
         self.title(f"FH6Auto by YSTO v{CURRENT_VERSION}")
-        self.geometry("1800x800")
+        self.geometry("1800x880")
         #self.minsize(980, 560)
         self.attributes("-topmost", False)
         self.attributes("-alpha", 0.98)
@@ -291,6 +291,7 @@ class FH_UltimateBot(ctk.CTk):
         self.car_counter = 0
         self.cj_counter = 0
         self.sc_count = 0
+        self.spin_counter = 0
         self.global_loop_current = 0
 
         self.template_cache = {}
@@ -302,7 +303,7 @@ class FH_UltimateBot(ctk.CTk):
         self.scaled_edge_template_cache = {}
 
         self.init_regions()
-        
+
                 # 【优化加载速度】：将IO提取与图像缓存的加载/生成放到后台线程，避免阻塞主界面启动
         def background_init():
             auto_extract_images()
@@ -319,10 +320,12 @@ class FH_UltimateBot(ctk.CTk):
             "chk_2": True,
             "chk_3": True,
             "chk_4": True,
+            "chk_5": True,
             "next_1": 2,
             "next_2": 3,
             "next_3": 1,
-            "next_4": 1,
+            "next_4": 5,
+            "next_5": 1,
             "global_loops": 10,
             "skill_dirs": ["right", "up", "up", "up", "left"],
             "share_code": "890169683",
@@ -335,12 +338,14 @@ class FH_UltimateBot(ctk.CTk):
         self.start_hotkey_listener()
         self.update_skill_grid()
         self.center_window()
-        self.log("免责声明：本脚本仅供 Python 自动化技术交流与学习使用。请勿用于商业盈利或破坏游戏平衡，因使用本脚本造成的账号封禁等损失，由使用者自行承担。")
-        self.log("默认刷图车辆：【斯巴鲁Impreza 22B-STi Version】【调校S2  900】【保持默认涂装】【收藏车辆】")
-        self.log("启动前先将键盘设置为【英文键盘】")
-        self.log("游戏设置为【自动转向】【自动挡】，游戏语言设置为【简体中文】")
-        self.log("大部分以图像识别作为引导，减少机器盲目操作的风险，但仍无法完全避免，使用前请做好准备")
 
+        self.log("   请认真阅读以下内容   ")
+        self.log("游戏难度设置为 自动转向 自动挡")
+        self.log("默认刷图车辆：【斯巴鲁Impreza 22B-STi Version】【调校S2  900】【保持默认涂装】【收藏车辆】")
+        self.log("刷点蓝图若使用503944655,请把换挡设置为手动档且在控制里把升档改为键位1,调教使用代码158607686,但仍有小概率跑偏")
+        self.log("为减少识图误差,建议把非22B外的所有斯巴鲁的车改涂装颜色为白色")
+        self.log("大部分以图像识别作为引导，减少机器盲目操作的风险，但仍无法完全避免，使用前请做好准备")
+        self.log("删车识别图像为images文件夹内D.png")
     # ==========================================
     # --- UI 安全调度 ---
     # ==========================================
@@ -376,8 +381,8 @@ class FH_UltimateBot(ctk.CTk):
             iv = int(v)
             if iv < 1:
                 iv = 1
-            if iv > 4:
-                iv = 4
+            if iv > 5:
+                iv = 5
             entry_widget.delete(0, "end")
             entry_widget.insert(0, str(iv))
         except Exception:
@@ -412,6 +417,8 @@ class FH_UltimateBot(ctk.CTk):
             try:
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                    if "next_5" not in data:
+                        data["next_4"] = 5
                     self.config.update(data)
             except Exception:
                 pass
@@ -422,6 +429,7 @@ class FH_UltimateBot(ctk.CTk):
             self.config["buy_count"] = int(self.entry_car.get())
             self.config["cj_count"] = int(self.entry_cj.get())
             self.config["sc_count"] = int(self.entry_sc.get())
+            self.config.pop("spin_count", None)
             self.config["global_loops"] = int(self.entry_global_loop.get())
             self.config["share_code"] = "".join(c for c in self.entry_share.get() if c.isdigit())
             #self.config["base_width"] = int(self.entry_base_w.get())
@@ -429,6 +437,7 @@ class FH_UltimateBot(ctk.CTk):
             self.config["next_2"] = int(self.entry_next2.get())
             self.config["next_3"] = int(self.entry_next3.get())
             self.config["next_4"] = int(self.entry_next4.get())
+            self.config["next_5"] = int(self.entry_next5.get())
         except Exception:
             pass
 
@@ -436,6 +445,7 @@ class FH_UltimateBot(ctk.CTk):
         self.config["chk_2"] = self.var_chk2.get()
         self.config["chk_3"] = self.var_chk3.get()
         self.config["chk_4"] = self.var_chk4.get()
+        self.config["chk_5"] = self.var_chk5.get()
         self.config["auto_restart"] = self.var_auto_restart.get()
         self.config["restart_cmd"] = self.le_restart_cmd.get().strip()
         try:
@@ -456,12 +466,12 @@ class FH_UltimateBot(ctk.CTk):
         if not val_a:
             self.log("未输入CR，无需计算。")
             return
-            
+
         try:
             target_cr = int(val_a)
             val_b = self.entry_calc_b.get().strip()
             cost_per_car = int(val_b) if val_b else 81700
-            
+
             val_c = self.entry_calc_c.get().strip()
             sp_per_car = int(val_c) if val_c else 30
         except Exception:
@@ -508,16 +518,16 @@ class FH_UltimateBot(ctk.CTk):
         # 4. 自动填写到界面
         self.entry_race.delete(0, "end")
         self.entry_race.insert(0, str(final_races_per_loop))
-        
+
         self.entry_car.delete(0, "end")
         self.entry_car.insert(0, str(cars_per_loop))
-        
+
         self.entry_cj.delete(0, "end")
         self.entry_cj.insert(0, str(cars_per_loop))
-        
+
         self.entry_sc.delete(0, "end")
         self.entry_sc.insert(0, str(cars_per_loop))
-        
+
         self.entry_global_loop.delete(0, "end")
         self.entry_global_loop.insert(0, str(final_loops))
 
@@ -534,11 +544,11 @@ class FH_UltimateBot(ctk.CTk):
         self.config_frame = ctk.CTkFrame(self.top_container, fg_color="transparent")
         self.config_frame.pack(fill="x")
 
-        def create_box(parent, title, btn_text, btn_cmd, btn_color, def_val):
+        def create_box(parent, title, btn_text, btn_cmd, btn_color, def_val=None):
             frame = ctk.CTkFrame(
                 parent,
-                width=210,
-                height=300,
+                width=220,
+                height=360,
                 corner_radius=12,
                 border_width=1,
                 border_color="#2B2B2B",
@@ -564,44 +574,48 @@ class FH_UltimateBot(ctk.CTk):
             )
             btn.pack(pady=8, padx=10)
 
-            entry = ctk.CTkEntry(frame, width=95, height=34, justify="center", corner_radius=8)
-            entry.insert(0, str(def_val))
-            entry.pack(pady=8)
+            entry = None
+            lbl = None
+            if def_val is not None:
+                entry = ctk.CTkEntry(frame, width=95, height=34, justify="center", corner_radius=8)
+                entry.insert(0, str(def_val))
+                entry.pack(pady=8)
 
-            lbl = ctk.CTkLabel(
-                frame,
-                text=f"执行: 0 / {def_val}",
-                text_color="#A0A0A0",
-                font=ctk.CTkFont(size=16),
-            )
-            lbl.pack(pady=8)
+                lbl = ctk.CTkLabel(
+                    frame,
+                    text=f"执行: 0 / {def_val}",
+                    text_color="#A0A0A0",
+                    font=ctk.CTkFont(size=16),
+                )
+                lbl.pack(pady=8)
             return frame, btn, entry, lbl
 
-        def create_next_step(parent, var_checked, def_step, box_h=300):
-            frame = ctk.CTkFrame(parent, width=120, height=box_h, corner_radius=12, border_width=1, border_color="#2B2B2B")
-            frame.pack(side="left", padx=4)
+        def add_next_step(parent, var_checked, def_step):
+            frame = ctk.CTkFrame(parent, fg_color="#242424", height=62, corner_radius=10)
+            frame.pack(side="bottom", fill="x", padx=12, pady=(8, 12))
             frame.pack_propagate(False)
 
             ctk.CTkLabel(
                 frame,
                 text="下一步骤",
-                font=ctk.CTkFont(size=18, weight="bold"),
+                font=ctk.CTkFont(size=14, weight="bold"),
                 text_color="#5DADE2",
-            ).pack(pady=(55, 10))
+            ).pack(side="left", padx=(10, 6))
 
-            entry = ctk.CTkEntry(frame, width=60, height=34, justify="center", corner_radius=8)
+            entry = ctk.CTkEntry(frame, width=48, height=30, justify="center", corner_radius=8)
             entry.insert(0, str(def_step))
-            entry.pack(pady=6)
+            entry.pack(side="left", padx=(0, 8))
 
             chk = ctk.CTkCheckBox(frame, text="继续", variable=var_checked, width=60)
-            chk.pack(pady=8)
+            chk.pack(side="left", padx=(0, 8))
 
-            return frame, entry, chk
+            return entry, chk
 
         self.var_chk1 = ctk.BooleanVar(value=self.config["chk_1"])
         self.var_chk2 = ctk.BooleanVar(value=self.config["chk_2"])
         self.var_chk3 = ctk.BooleanVar(value=self.config["chk_3"])
         self.var_chk4 = ctk.BooleanVar(value=self.config.get("chk_4", True))
+        self.var_chk5 = ctk.BooleanVar(value=self.config.get("chk_5", True))
 
         box_race, self.btn_race, self.entry_race, self.lbl_race = create_box(
             self.config_frame,
@@ -614,10 +628,7 @@ class FH_UltimateBot(ctk.CTk):
         self.entry_share = ctk.CTkEntry(box_race, width=130, justify="center", placeholder_text="蓝图数字代码")
         self.entry_share.insert(0, self.config["share_code"])
         self.entry_share.pack(pady=4)
-
-        self.next_frame1, self.entry_next1, self.chk1 = create_next_step(
-            self.config_frame, self.var_chk1, self.config.get("next_1", 2)
-        )
+        self.entry_next1, self.chk1 = add_next_step(box_race, self.var_chk1, self.config.get("next_1", 2))
 
         box_car, self.btn_car, self.entry_car, self.lbl_car = create_box(
             self.config_frame,
@@ -628,15 +639,12 @@ class FH_UltimateBot(ctk.CTk):
             self.config["buy_count"],
         )
         self.entry_car.bind("<KeyRelease>", self.sync_buy_to_sell)
-
-        self.next_frame2, self.entry_next2, self.chk2 = create_next_step(
-            self.config_frame, self.var_chk2, self.config.get("next_2", 3)
-        )
+        self.entry_next2, self.chk2 = add_next_step(box_car, self.var_chk2, self.config.get("next_2", 3))
 
         self.box_cj = ctk.CTkFrame(
             self.config_frame,
             width=360,
-            height=300,
+            height=360,
             corner_radius=12,
             border_width=1,
             border_color="#2B2B2B",
@@ -645,7 +653,7 @@ class FH_UltimateBot(ctk.CTk):
         self.box_cj.pack(side="left", padx=8)
 
         top_cj = ctk.CTkFrame(self.box_cj, fg_color="transparent")
-        top_cj.pack(fill="x", pady=10)
+        top_cj.pack(fill="x", pady=(10, 0))
 
         left_cj = ctk.CTkFrame(top_cj, fg_color="transparent")
         left_cj.pack(side="left", padx=10)
@@ -723,9 +731,7 @@ class FH_UltimateBot(ctk.CTk):
             text_color="#A0A0A0",
         ).grid(row=4, column=0, columnspan=4, pady=(8, 0))
 
-        self.next_frame3, self.entry_next3, self.chk3 = create_next_step(
-            self.config_frame, self.var_chk3, self.config.get("next_3", 4)
-        )
+        self.entry_next3, self.chk3 = add_next_step(self.box_cj, self.var_chk3, self.config.get("next_3", 4))
 
         box_sc, self.btn_sc, self.entry_sc, self.lbl_sc = create_box(
             self.config_frame,
@@ -735,10 +741,16 @@ class FH_UltimateBot(ctk.CTk):
             "#D97706",
             self.config.get("sc_count", 30),
         )
+        self.entry_next4, self.chk4 = add_next_step(box_sc, self.var_chk4, self.config.get("next_4", 5))
 
-        self.next_frame4, self.entry_next4, self.chk4 = create_next_step(
-            self.config_frame, self.var_chk4, self.config.get("next_4", 1)
+        box_spin, self.btn_spin, _, _ = create_box(
+            self.config_frame,
+            "5. 开抽",
+            "开始",
+            lambda: self.start_pipeline("spin"),
+            "#0E7490",
         )
+        self.entry_next5, self.chk5 = add_next_step(box_spin, self.var_chk5, self.config.get("next_5", 1))
                 # ====== 抽离到底部的全局设置栏 (放在上方) ======
         # 【修改1】把 self.top_container 改成了 self
         self.global_settings_frame = ctk.CTkFrame(self, fg_color="#2B2B2B", height=45, corner_radius=10)
@@ -797,7 +809,7 @@ class FH_UltimateBot(ctk.CTk):
             hover_color="#A04000",
             command=self.auto_calculate_pipeline
         ).pack(side="left", padx=(0, 15))
-        
+
         # 动态限制输入框长度（只允许数字并截断）
         def limit_len(evt, widget, max_l):
             val = "".join(c for c in widget.get() if c.isdigit())
@@ -818,7 +830,8 @@ class FH_UltimateBot(ctk.CTk):
         self.entry_next1.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next1, 2))
         self.entry_next2.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next2, 3))
         self.entry_next3.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next3, 4))
-        self.entry_next4.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next4, 1))
+        self.entry_next4.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next4, 5))
+        self.entry_next5.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next5, 1))
 
         if not self.entry_sc.get().strip():
             self.entry_sc.insert(0, "30")
@@ -1032,7 +1045,7 @@ class FH_UltimateBot(ctk.CTk):
         try:
             self.lbl_mini_time.configure(text=time_str)
         except Exception: pass
-        
+
         if self.is_running:
             self.after(1000, self.update_timer)
 
@@ -1103,7 +1116,7 @@ class FH_UltimateBot(ctk.CTk):
         if not self.is_running or not pos:
             return
         x, y = int(pos[0]), int(pos[1])
-        
+
         # 使用多屏兼容的硬件级移动
         self.hw_mouse_move(x, y)
         time.sleep(0.2)
@@ -1136,7 +1149,7 @@ class FH_UltimateBot(ctk.CTk):
         except Exception:
             # 兜底：如果获取不到窗口坐标，就直接当绝对坐标移动
             self.hw_mouse_move(x, y)
-    
+
     def add_skill_dir(self, direction):
         self.config["skill_dirs"].append(direction)
         self.update_skill_grid()
@@ -1229,17 +1242,18 @@ class FH_UltimateBot(ctk.CTk):
 
         self.attributes("-topmost", True)
         self.geometry(f"{calc_w}x{calc_h}+{pos_x}+{pos_y}")
-        
+
         # 启动计时器
         self.start_time = time.time()
         self.update_timer()
 
-        
+
         self.update_running_ui("初始化中...")
         self.race_counter = 0
         self.car_counter = 0
         self.cj_counter = 0
         self.sc_count = 0
+        self.spin_counter = 0
         self.global_loop_current = 0
 
         def runner():
@@ -1247,7 +1261,7 @@ class FH_UltimateBot(ctk.CTk):
                 self.stop_all()
                 return
 
-            steps = ["race", "buy", "cj", "sell"]
+            steps = ["race", "buy", "cj", "sell", "spin"]
             curr_idx = steps.index(start_step)
 
             try:
@@ -1270,6 +1284,8 @@ class FH_UltimateBot(ctk.CTk):
                         success = self.logic_super_wheelspin(int(self.entry_cj.get()))
                     elif step_name == "sell":
                         success = self.sell_consumable_car(int(self.entry_sc.get()))
+                    elif step_name == "spin":
+                        success = self.logic_consume_wheelspins()
                 except Exception as e:
                     self.log(f"执行模块 {step_name} 时异常: {e}")
                     success = False
@@ -1288,34 +1304,39 @@ class FH_UltimateBot(ctk.CTk):
                 next_idx = curr_idx + 1 # 默认前往下一步
                 if curr_idx == 0:
                     if self.var_chk1.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next1.get()) - 1))
+                        try: next_idx = max(0, min(4, int(self.entry_next1.get()) - 1))
                         except Exception: next_idx = 1
                     else: break
                 elif curr_idx == 1:
                     if self.var_chk2.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next2.get()) - 1))
+                        try: next_idx = max(0, min(4, int(self.entry_next2.get()) - 1))
                         except Exception: next_idx = 2
                     else: break
                 elif curr_idx == 2:
                     if self.var_chk3.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next3.get()) - 1))
+                        try: next_idx = max(0, min(4, int(self.entry_next3.get()) - 1))
                         except Exception: next_idx = 3
                     else: break
                 elif curr_idx == 3:
                     if self.var_chk4.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next4.get()) - 1))
+                        try: next_idx = max(0, min(4, int(self.entry_next4.get()) - 1))
+                        except Exception: next_idx = 4
+                    else: break
+                elif curr_idx == 4:
+                    if self.var_chk5.get():
+                        try: next_idx = max(0, min(4, int(self.entry_next5.get()) - 1))
                         except Exception: next_idx = 0
                     else: break
 
                 if next_idx <= curr_idx:
                     self.global_loop_current += 1
-                    
+
                     if self.global_loop_current > total_loops:
                         self.log("达到设定的总循环次数，任务圆满结束。")
                         break
-                        
+
                     self.log(f"开启新一轮大循环 ({self.global_loop_current}/{total_loops})")
-                    
+
                     if hasattr(self, "lbl_mini_loop"):
                         self.ui_call(self.lbl_mini_loop.configure, text=f"大循环: {self.global_loop_current} / {total_loops}")
 
@@ -1323,7 +1344,8 @@ class FH_UltimateBot(ctk.CTk):
                     self.car_counter = 0
                     self.cj_counter = 0
                     self.sc_count = 0
-                
+                    self.spin_counter = 0
+
                 curr_idx = next_idx
 
             self.stop_all()
@@ -1351,29 +1373,29 @@ class FH_UltimateBot(ctk.CTk):
         def restore_ui():
             if hasattr(self, "mini_frame"):
                 self.mini_frame.pack_forget()
-                
+
             # 【核心修复】：先让大容器里的东西全部解绑，洗牌重来
             self.config_frame.pack_forget()
             self.global_settings_frame.pack_forget()
             self.calc_frame.pack_forget()
-            
+
             # 1. 铺设最外层大容器
             self.top_container.pack(fill="x", padx=18, pady=(18, 10))
-            
+
             # 2. 依次按顺序塞入三个模块，完美保证从上到下的顺序！
             self.config_frame.pack(fill="x")
             self.global_settings_frame.pack(fill="x", pady=(15, 0))
             self.calc_frame.pack(fill="x", pady=(10, 0))
-            
+
             # 3. 铺设底部的日志和按钮
             if hasattr(self, "bottom_frame"):
                 self.bottom_frame.pack(fill="both", expand=True, padx=18, pady=(6, 12))
             self.btn_support.pack(fill="x", padx=18, pady=(6, 12))
-            
+
             # 恢复窗口原本的状态
             self.btn_stop.configure(text="等待指令 (F8)", fg_color="#3A3A3A", hover_color="#4A4A4A")
             self.attributes("-topmost", False)
-            self.geometry("1800x800")
+            self.geometry("1800x880")
             self.center_window()
 
         self.ui_call(restore_ui)
@@ -1390,7 +1412,7 @@ class FH_UltimateBot(ctk.CTk):
 
         threading.Thread(target=hotkey_thread, daemon=True).start()
 
-   
+
     # ==========================================
     # --- 逻辑保障 ---
     # ==========================================
@@ -1407,7 +1429,7 @@ class FH_UltimateBot(ctk.CTk):
             WM_IME_CONTROL = 0x0283
             IMC_SETOPENSTATUS = 0x0006
             ctypes.windll.user32.SendMessageW(hwnd, WM_IME_CONTROL, IMC_SETOPENSTATUS, 0)
-            
+
             self.log("已自动切换英文键盘/关闭中文输入法状态。")
         except Exception as e:
             self.log(f"自动防中文输入设置失败: {e}")
@@ -1454,7 +1476,7 @@ class FH_UltimateBot(ctk.CTk):
                     ctypes.windll.user32.ShowWindow(hwnd, 9)
                 else:
                     ctypes.windll.user32.ShowWindow(hwnd, 5)
-                    
+
                 ctypes.windll.user32.SetForegroundWindow(hwnd)
                 time.sleep(0.5)
                 # ====== 【新增】：强制关闭中文输入法 ======
@@ -1466,18 +1488,7 @@ class FH_UltimateBot(ctk.CTk):
                     x, y = pt[0], pt[1]
                     w, h = client_rect[2], client_rect[3]
                     self.update_regions_by_window(x, y, w, h)
-                    # ====== 【新增】：小窗口精准吸附游戏所在屏幕的右上角 ======
-                    def snap_to_game():
-                        if self.is_running:
-                            calc_w = int(w * 0.40)
-                            calc_h = int(h * 0.15)
-                            calc_w = max(calc_w, 650)
-                            calc_h = max(calc_h, 150)
-                            pos_x = x + w - calc_w - 20
-                            pos_y = y + 20
-                            self.geometry(f"{calc_w}x{calc_h}+{pos_x}+{pos_y}")
-                    self.ui_call(snap_to_game)
-                    # ==========================================
+
                 except Exception as e:
                     self.log(f"获取窗口坐标失败: {e}")
 
@@ -1646,7 +1657,7 @@ class FH_UltimateBot(ctk.CTk):
 
         self.log("100 次尝试进入菜单均失败。")
         return False
-    
+
     # ==========================================
     # --- 图像寻找 ---
     # ==========================================
@@ -1803,7 +1814,7 @@ class FH_UltimateBot(ctk.CTk):
         except Exception:
             # 兼容老版本 Pillow 的降级方案
             screen = pyautogui.screenshot(region=region)
-            
+
         return cv2.cvtColor(np.array(screen), cv2.COLOR_RGB2BGR)
 
     def get_scales_to_try(self, fast_mode=True):
@@ -2067,7 +2078,7 @@ class FH_UltimateBot(ctk.CTk):
         except Exception as e:
             self.log(f"⚠️ find_image_with_element_stable 识别报错: {e}")
             return None
-    
+
     def find_image_with_element_multi(self, main_path, sub_path, region=None, fast_mode=True,
                                       main_threshold=0.60, like_threshold=0.75, final_threshold=0.72):
         if not self.is_running:
@@ -2409,19 +2420,19 @@ class FH_UltimateBot(ctk.CTk):
 
         self.update_running_ui("循环跑图", self.race_counter, target_count)
 
-        self.log("准备验证/进入菜单...")
+        self.log("进入菜单")
         if not self.enter_menu():
             return False
 
-        self.log("切换到创意中心...")
+        self.log("切换到创意中心")
         for _ in range(4):
-            self.hw_press("pagedown", delay=0.15)
+            self.hw_press("pagedown", delay=0.03)
             time.sleep(0.3)
 
         time.sleep(0.8)
 
         pos_el = self.wait_for_any_image(
-            ["eventlab.png", "eventlabcar.png"],
+            ["eventlab.png","eventlabcar.png"],
             region=self.regions["全界面"],
             threshold=0.5,
             timeout=5,
@@ -2542,7 +2553,7 @@ class FH_UltimateBot(ctk.CTk):
                     "liketag.png",
                     region=self.regions["全界面"],
                     threshold=0.8,
-                    timeout=0.8,
+                    timeout=0.5,
                     interval=0.2,
                     fast_mode=True
                 )
@@ -2607,10 +2618,10 @@ class FH_UltimateBot(ctk.CTk):
                 elap = time.time() - start_w
 
                 if elap >= 3.0 and e_pressed == 0:
-                    self.hw_press("e")
+                    self.hw_press("1")
                     e_pressed = 1
                 elif elap >= 5.0 and e_pressed == 1:
-                    self.hw_press("e")
+                    self.hw_press("1")
                     e_pressed = 2
 
                 if time.time() - last_chk >= 1.0:
@@ -2631,7 +2642,7 @@ class FH_UltimateBot(ctk.CTk):
                 time.sleep(2.0)
             else:
                 self.hw_press("x")
-                time.sleep(0.8)
+                time.sleep(0.5)
                 self.hw_press("enter")
                 time.sleep(2.0)
 
@@ -2649,7 +2660,7 @@ class FH_UltimateBot(ctk.CTk):
 
         self.update_running_ui("批量买车", self.car_counter, target_count)
 
-        self.log("准备验证/进入菜单...")
+        self.log("进入菜单")
         if not self.enter_menu():
             return False
 
@@ -2710,7 +2721,7 @@ class FH_UltimateBot(ctk.CTk):
                 ["CCbrand.png"],
                 region=self.regions["全界面"],
                 threshold=0.75,
-                timeout=0.8,
+                timeout=0.5,
                 interval=0.2,
                 fast_mode=True
             )
@@ -2747,7 +2758,6 @@ class FH_UltimateBot(ctk.CTk):
         while self.car_counter < target_count:
             if not self.is_running:
                 return False
-
             self.hw_press("space")
             time.sleep(0.6)
             self.hw_press("down")
@@ -2778,12 +2788,12 @@ class FH_UltimateBot(ctk.CTk):
 
         self.update_running_ui("超级抽奖", self.cj_counter, target_count)
 
-        self.log("准备验证/进入菜单...")
+        self.log("进入菜单")
         if not self.enter_menu():
             return False
 
-        self.log("进入车辆与收藏...")
-        self.hw_press("pagedown", delay=0.15)
+        self.log("进入车辆与收藏")
+        self.hw_press("pagedown")
         time.sleep(1.0)
 
         pos_buycar = self.wait_for_image(
@@ -2815,18 +2825,37 @@ class FH_UltimateBot(ctk.CTk):
             self.log("未找到购买与出售")
             return False
 
-        self.game_click(pos_bs)
-        time.sleep(1.0)
-        self.hw_press("pagedown", delay=0.15)
+        self.hw_press("pagedown")
         self.log("进入车辆界面...")
-        time.sleep(0.5)
+        time.sleep(1.0)
 
         while self.cj_counter < target_count:
             if not self.is_running:
                 return False
-            self.log("进入我的车辆.")
+            self.log("进入设计与喷涂.")
+
+            for _ in range(2):
+                self.hw_press("down", delay=0.02)
+                time.sleep(0.5)
+
             self.hw_press("enter")
-            time.sleep(2.0)
+            time.sleep(1.0)
+
+            pos = self.wait_for_image(
+                "choosecar.png",
+                region=self.regions["左"],
+                threshold=0.7,
+                timeout=10,
+                interval=0.3,
+                fast_mode=True
+            )
+            if not pos:
+                self.log("未识别到 选择车辆")
+                return False
+
+            self.game_click(pos)
+            time.sleep(1.0)
+
             self.hw_press("backspace")
             time.sleep(1.0)
 
@@ -2854,7 +2883,7 @@ class FH_UltimateBot(ctk.CTk):
                 return False
 
             self.game_click(brand_pos)
-            time.sleep(1.0)
+            time.sleep(0.4)
 
             found_car = False
             for _ in range(85):
@@ -2864,25 +2893,22 @@ class FH_UltimateBot(ctk.CTk):
                     "newCC.png",
                     "newcartag.png",
                     region=self.regions["全界面"],
-                    threshold=0.85,     # 调低阈值包容标签遮挡
-                    fast_mode=False     # 释放多重缩放火力
+                    threshold=0.8,
+                    fast_mode=False
                 )
                 if pos_target:
                     self.game_click(pos_target)
                     found_car = True
                     break
-                for _ in range(4):
-                    self.hw_press("right", delay=0.05)
-                    time.sleep(0.08)
-                time.sleep(0.4)
+                self.hw_press("right")
+                time.sleep(0.01)
             if not found_car:
                 self.log("列表中未找到目标车辆")
                 return False
+
             time.sleep(1.2)
             self.hw_press("enter")
-            time.sleep(1.0)
-            self.hw_press("enter")
-            time.sleep(1.0)
+            time.sleep(3.0)
 
 
             pos_sjy = None
@@ -2894,7 +2920,7 @@ class FH_UltimateBot(ctk.CTk):
                     ["UandT-w.png", "UandT-b.png"],
                     region=self.regions["左下"],
                     threshold=0.75,
-                    timeout=0.8,
+                    timeout=1,
                     interval=0.2,
                     fast_mode=True
                 )
@@ -2915,7 +2941,7 @@ class FH_UltimateBot(ctk.CTk):
                 ["clsldcnw.png", "clsldcnb.png"],
                 region=self.regions["左下"],
                 threshold=0.75,
-                timeout=20,
+                timeout=10,
                 interval=0.4,
                 fast_mode=True
             )
@@ -2924,13 +2950,13 @@ class FH_UltimateBot(ctk.CTk):
                 return False
 
             self.game_click(pos_cls)
-            time.sleep(1.5)
+            time.sleep(1.0)
 
             pos_exp = self.wait_for_any_image(
                 ["EXPwU.png"],
                 region=self.regions["左"],
                 threshold=0.75,
-                timeout=2,
+                timeout=5,
                 interval=0.3,
                 fast_mode=True
             )
@@ -2938,9 +2964,9 @@ class FH_UltimateBot(ctk.CTk):
             if pos_exp:
                 self.log("该车辆技能已点过，跳过计数")
             else:
-                time.sleep(1.0)
+                time.sleep(0.25)
                 self.hw_press("enter")
-                time.sleep(1.5)
+                time.sleep(1.0)
 
                 for dk in self.config["skill_dirs"]:
                     if not self.is_running:
@@ -2951,15 +2977,15 @@ class FH_UltimateBot(ctk.CTk):
                     time.sleep(1.2)
                 if self.find_image("SPNE.png", region=self.regions["全界面"], threshold=0.7, fast_mode=True):
                     self.log("已无技能点或技能已点完，提前结束抽奖！")
-                    time.sleep(1.0)
+                    time.sleep(0.65)
                     self.hw_press("enter")
                     time.sleep(0.8)
                     self.hw_press("esc")
-                    time.sleep(1.0)
+                    time.sleep(1)
                     self.hw_press("esc")
-                    time.sleep(1.0)
+                    time.sleep(1)
                     self.hw_press("esc")
-                    time.sleep(1.0)
+                    time.sleep(1)
                     return True
                 self.cj_counter += 1
                 self.update_running_ui("超级抽奖", self.cj_counter, target_count)
@@ -2968,13 +2994,11 @@ class FH_UltimateBot(ctk.CTk):
             time.sleep(1.2)
             self.hw_press("esc")
             time.sleep(0.8)
-            self.hw_press("up", delay=0.15)
-            time.sleep(0.8)
-        self.hw_press("esc")
-        time.sleep(1.2)
-        self.hw_press("esc")
-        time.sleep(1.2)
+            self.hw_press("up")
+            time.sleep(1.0)
+
         return True
+
     # ==========================================
     # --- 模块：移除车辆 ---
     # ==========================================
@@ -2985,19 +3009,19 @@ class FH_UltimateBot(ctk.CTk):
 
         self.update_running_ui("移除车辆", self.sc_count, target_count)
 
-        self.log("准备验证/进入菜单！！！使用前请人工核验到正常移除车辆再进行自动化移除处理")
+        self.log("准备验证/进入菜单")
         if not self.enter_menu():
             return False
 
-        self.log("进入车辆与收藏！！！使用前请人工核验到正常移除车辆再进行自动化移除处理")
-        self.hw_press("pagedown", delay=0.15)
-        time.sleep(1.0)
+        self.log("进入车辆与收藏")
+        self.hw_press("pagedown")
+        time.sleep(0.5)
 
         pos_buycar = self.wait_for_image(
             "BNandUC.png",
             region=self.regions["左"],
             threshold=0.75,
-            timeout=12,
+            timeout=10,
             interval=0.3,
             fast_mode=True
         )
@@ -3006,10 +3030,14 @@ class FH_UltimateBot(ctk.CTk):
             return False
 
         self.game_click(pos_buycar)
-        time.sleep(0.8)
+        time.sleep(1.0)
         self.hw_press("enter")
-        time.sleep(5)
+        time.sleep(5.0)
 
+
+
+
+		#进入我的车辆
         pos_bs = self.wait_for_any_image(
             ["buyandsell-w.png", "buyandsell-b.png"],
             region=self.regions["上"],
@@ -3024,13 +3052,10 @@ class FH_UltimateBot(ctk.CTk):
 
         self.game_click(pos_bs)
         time.sleep(1.0)
-
-        self.hw_press("pagedown", delay=0.15)
+        self.hw_press("pagedown")
         time.sleep(1.0)
-
-        self.hw_press("enter")  # 进入我的车辆
+        self.hw_press("enter")
         time.sleep(2.0)
-        #选择一辆收藏
         self.hw_press("y") 
         time.sleep(1.0)
         self.hw_press("enter")
@@ -3042,17 +3067,19 @@ class FH_UltimateBot(ctk.CTk):
         time.sleep(0.8)
         self.move_to_game_coord(5, 5)
         time.sleep(0.2)
+
+		#上车
         pos = self.wait_for_image(
             "rc.png",
-            region=self.regions["全界面"], # 【修改】：从中间改为全界面，防止漏搜
-            threshold=0.65,             # 【修改】：稍微降低阈值，提高识别率
-            timeout=5,                  # 【修改】：给足弹窗出现的时间
+            region=self.regions["全界面"],
+            threshold=0.65,
+            timeout=5,
             interval=0.2,
             fast_mode=True
         )
         if pos:
             self.log("找到上车，执行点击")
-            self.game_click(pos) # 【重要修复】：之前写的是 self.safe_click 导致直接报错崩溃，现已修正
+            self.game_click(pos)
             time.sleep(2.0)
         else:
             self.log("该车辆已经驾驶，或未找到图片，执行两次ESC")
@@ -3061,6 +3088,8 @@ class FH_UltimateBot(ctk.CTk):
             self.hw_press("esc")
         time.sleep(2.0)
 
+
+		#检测是否回到车辆页
         found = False
         for i in range(30):
             if not self.is_running:
@@ -3083,53 +3112,82 @@ class FH_UltimateBot(ctk.CTk):
         if not found:
             self.log("30次内未找到购买与出售")
             return False
-        
         time.sleep(1.5)
-        # 切换排序：最近获得
-        self.hw_press("x")
-        time.sleep(0.5)
-        #鼠标复位
-        self.move_to_game_coord(5, 5)
-        #选择最近获得
-        self.log("切换到 最近获得 的排序...")
-        for _ in range(6):
-            if not self.is_running:
-                return False
-            self.hw_press("down")
-            time.sleep(0.25)
-        time.sleep(0.2)
-        self.hw_press("enter")
-        time.sleep(1.2)
-        self.log("回到最近获得的前面")
-        # 回到列表首项
+
+        # 定位制造商
         self.hw_press("backspace")
         time.sleep(0.8)
-        self.hw_press("enter")
-        time.sleep(1.5)
+        brand_pos = None
+        for _ in range(20):
+            if not self.is_running:
+                return False
 
-        self.log("开始删除最近获得的车辆！！！请人工确认是否移除")
+            brand_pos = self.wait_for_any_image(
+                ["CCbrand.png"],
+                region=self.regions["全界面"],
+                threshold=0.75,
+                timeout=0.8,
+                interval=0.2,
+                fast_mode=True
+            )
+            if brand_pos:
+                break
 
+            self.hw_press("up")
+            time.sleep(0.2)
+
+        if not brand_pos:
+            self.log("未找到品牌")
+            return False
+
+        self.game_click(brand_pos)
+        time.sleep(0.65)
+
+        # 定位车辆
+        self.log("开始删除车辆")
         while self.sc_count < target_count:
             self.log(f"is_running = {self.is_running}")
             if not self.is_running:
                 return False
-            # 进入当前车辆
-            self.hw_press("enter")
-            time.sleep(1.2)
-            #跳到从车库移除
-            for _ in range(6):
+
+            found_car = False
+            for _ in range(30):
                 if not self.is_running:
                     return False
-                self.hw_press("down")
-                time.sleep(0.2)
+                pos_DEL = self.wait_for_image(
+                    "D.png",
+                    region=self.regions["左"],
+                    threshold=0.98,
+					timeout=12,
+                    fast_mode=False
+                )
+                if pos_DEL:
+                    self.game_click(pos_DEL)
+                    found_car = True
+                    break
+                self.hw_press("right")
+                time.sleep(0.02)
+            if not pos_DEL:
+                self.log("列表中未找到目标车辆")
+                return False
+            time.sleep(1.5)
             self.hw_press("enter")
-            time.sleep(0.5)
-            #向下选择“嗯”
+            time.sleep(1.5)
             self.hw_press("down")
-            time.sleep(0.3)
-            #确认“嗯”
+            time.sleep(0.25)
+            self.hw_press("down")
+            time.sleep(0.25)
+            self.hw_press("down")
+            time.sleep(0.25)
+            self.hw_press("down")
+            time.sleep(0.25)
             self.hw_press("enter")
-            time.sleep(0.8)
+            time.sleep(1.5)
+            self.hw_press("down")
+            time.sleep(0.25)
+            self.hw_press("enter")
+            time.sleep(2.0)
+            self.hw_press("up")
             self.sc_count += 1
             self.log(f"已尝试删除车辆 {self.sc_count}/{target_count}")
 
@@ -3140,10 +3198,127 @@ class FH_UltimateBot(ctk.CTk):
             time.sleep(1.0)
 
         return True
+
+    # ==========================================
+    # --- 模块：开抽 ---
+    # ==========================================
+    def wait_for_wheelspin_menu(self, timeout=12):
+        return self.wait_for_any_image(
+            ["SuperWheelSpin.png", "WheelSpin.png"],
+            region=self.regions["全界面"],
+            threshold=0.75,
+            timeout=timeout,
+            interval=0.2,
+            fast_mode=True
+        )
+
+    def consume_single_wheelspin_type(self, spin_image, empty_image, log_name):
+        if not self.is_running:
+            return False
+
+        for attempt in range(500):
+            if not self.is_running:
+                return False
+
+            if self.find_image(empty_image, region=self.regions["全界面"], threshold=0.75, fast_mode=True):
+                self.log(f"{log_name}已用完，确认返回")
+                self.hw_press("enter")
+                time.sleep(1.0)
+                if not self.wait_for_wheelspin_menu(timeout=12):
+                    return False
+                return "empty"
+
+            pos_spin = self.wait_for_image(
+                spin_image,
+                region=self.regions["全界面"],
+                threshold=0.75,
+                timeout=2,
+                interval=0.2,
+                fast_mode=True
+            )
+            if not pos_spin:
+                self.log(f"未找到{log_name}入口，跳过")
+                return True
+
+            self.log(f"开始{log_name} ({attempt + 1})")
+            self.game_click(pos_spin)
+
+            empty_seen = False
+            menu_seen = False
+            for _ in range(240):
+                if not self.is_running:
+                    return False
+
+                for _ in range(50):
+                    if not self.is_running:
+                        return False
+                    self.hw_press("enter", delay=0.02)
+                    time.sleep(0.1)
+
+                if self.find_image(empty_image, region=self.regions["全界面"], threshold=0.75, fast_mode=True):
+                    empty_seen = True
+                    break
+
+                if self.find_any_image(["SuperWheelSpin.png", "WheelSpin.png"], region=self.regions["全界面"], threshold=0.75, fast_mode=True):
+                    menu_seen = True
+                    break
+
+            if not empty_seen and not menu_seen:
+                self.log(f"{log_name}等待结果超时")
+                return False
+
+            if empty_seen:
+                self.log(f"{log_name}已用完，确认返回")
+                self.hw_press("enter")
+                time.sleep(1.0)
+                if not self.wait_for_wheelspin_menu(timeout=12):
+                    return False
+                return "empty"
+
+            if menu_seen:
+                self.log(f"{log_name}已回到抽奖菜单，切换下一类抽奖")
+                return "empty"
+
+        self.log(f"{log_name}尝试次数过多，停止")
+        return False
+
+    def logic_consume_wheelspins(self):
+        self.update_running_ui("开抽", 0, 1)
+
+        self.log("进入菜单")
+        if not self.enter_menu():
+            return False
+
+        self.log("切换到我的地平线")
+        for _ in range(2):
+            self.hw_press("pagedown")
+            time.sleep(0.5)
+
+        if not self.wait_for_wheelspin_menu(timeout=12):
+            self.log("未找到抽奖入口")
+            return False
+
+        super_result = self.consume_single_wheelspin_type("SuperWheelSpin.png", "NoSuperSpinsLeft.png", "超级抽奖")
+        if super_result is False:
+            return False
+
+        regular_result = self.consume_single_wheelspin_type("WheelSpin.png", "NoSpinsLeft.png", "普通抽奖")
+        if regular_result is False:
+            return False
+
+        for _ in range(2):
+            if not self.is_running:
+                return False
+            self.hw_press("pageup")
+            time.sleep(0.5)
+
+        self.spin_counter = 1
+        self.update_running_ui("开抽", 1, 1)
+        return True
     #===============================
     #---自动超级抽奖-----
     #===============================
-    
+
 
 if __name__ == "__main__":
     app = FH_UltimateBot()
