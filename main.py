@@ -2183,6 +2183,108 @@ class FH_UltimateBot(ctk.CTk):
             self.log(f"⚠️ find_image_with_element_stable 识别报错: {e}")
             return None
     
+    def find_image_with_element_multi(self, main_path, sub_path, region=None, fast_mode=True,
+                                      main_threshold=0.60, like_threshold=0.75, final_threshold=0.72):
+        if not self.is_running:
+            return None
+
+        try:
+            screen_bgr = self.capture_region(region)
+            screen_gray = self.to_gray_image(screen_bgr)
+            screen_edge = self.to_edge_image(screen_bgr)
+
+            scales_to_try = self.get_scales_to_try(fast_mode=fast_mode)
+
+            best_score = 0.0
+            best_pos = None
+
+            for scale in scales_to_try:
+                main_tpl_c, _ = self.get_scaled_template(main_path, scale)
+                sub_tpl_c, _ = self.get_scaled_template(sub_path, scale)
+
+                if main_tpl_c is None or sub_tpl_c is None:
+                    continue
+
+                main_tpl_gray = self.to_gray_image(main_tpl_c)
+                main_tpl_edge = self.to_edge_image(main_tpl_c)
+
+                h_m, w_m = main_tpl_c.shape[:2]
+                if h_m < 5 or w_m < 5:
+                    continue
+                if h_m > screen_bgr.shape[0] or w_m > screen_bgr.shape[1]:
+                    continue
+
+                res_main = cv2.matchTemplate(screen_bgr, main_tpl_c, cv2.TM_CCOEFF_NORMED)
+                loc = np.where(res_main >= main_threshold)
+
+                checked_points = set()
+
+                for pt in zip(*loc[::-1]):
+                    x, y = pt
+
+                    key = (x // 10, y // 10)
+                    if key in checked_points:
+                        continue
+                    checked_points.add(key)
+
+                    roi_bgr = screen_bgr[y:y + h_m, x:x + w_m]
+                    roi_gray = screen_gray[y:y + h_m, x:x + w_m]
+                    roi_edge = screen_edge[y:y + h_m, x:x + w_m]
+
+                    if roi_bgr.shape[:2] != main_tpl_c.shape[:2]:
+                        continue
+
+                    color_score = self.match_template_score(roi_bgr, main_tpl_c)
+                    gray_score = self.match_template_score(roi_gray, main_tpl_gray)
+                    edge_score = self.match_template_score(roi_edge, main_tpl_edge)
+
+                    roi_center = self.crop_center_ratio(roi_bgr, ratio=0.6)
+                    tpl_center = self.crop_center_ratio(main_tpl_c, ratio=0.6)
+                    center_score = self.match_template_score(roi_center, tpl_center)
+
+                    pad = 5
+                    sub_roi = screen_bgr[
+                        max(0, y - pad):min(screen_bgr.shape[0], y + h_m + pad),
+                        max(0, x - pad):min(screen_bgr.shape[1], x + w_m + pad),
+                    ]
+                    like_score = self.match_template_score(sub_roi, sub_tpl_c)
+
+                    if like_score < like_threshold:
+                        continue
+
+                    final_score = (
+                        color_score * 0.30 +
+                        gray_score * 0.20 +
+                        edge_score * 0.20 +
+                        center_score * 0.15 +
+                        like_score * 0.15
+                    )
+
+                    if final_score > best_score:
+                        best_score = final_score
+                        best_pos = (
+                            x + w_m // 2 + (region[0] if region else 0),
+                            y + h_m // 2 + (region[1] if region else 0),
+                        )
+
+                    if final_score >= final_threshold:
+                        self.log(f"[MultiMatch] 命中: {main_path}+{sub_path} | 总分:{final_score:.3f}(需>{final_threshold}) [彩:{color_score:.2f} 灰:{gray_score:.2f} 边:{edge_score:.2f} 中:{center_score:.2f} 标签:{like_score:.2f}] | 缩放比:{scale:.3f}")
+                        return (
+                            x + w_m // 2 + (region[0] if region else 0),
+                            y + h_m // 2 + (region[1] if region else 0),
+                        )
+
+            if best_score >= final_threshold:
+                self.log(f"[multi_match] 命中 {main_path} 最终分数: {best_score:.3f}")
+                return best_pos
+
+            self.log(f"[multi_match] 未命中 {main_path}，最高分仅: {best_score:.3f}")
+            return None
+
+        except Exception as e:
+            self.log(f"find_image_with_element_multi 异常: {e}")
+            return None
+
     
     def find_image_with_element_fast(self, main_path, sub_path, region=None, threshold=0.70, sub_threshold=0.70):
         if not self.is_running:
