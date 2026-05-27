@@ -291,6 +291,7 @@ class FH_UltimateBot(ctk.CTk):
         self.car_counter = 0
         self.cj_counter = 0
         self.sc_count = 0
+        self.spin_counter = 0
         self.global_loop_current = 0
 
         self.template_cache = {}
@@ -315,14 +316,17 @@ class FH_UltimateBot(ctk.CTk):
             "buy_count": 30,
             "cj_count": 30,
             "sc_count": 30,
+            "spin_count": 1,
             "chk_1": True,
             "chk_2": True,
             "chk_3": True,
             "chk_4": True,
+            "chk_5": True,
             "next_1": 2,
             "next_2": 3,
             "next_3": 1,
-            "next_4": 1,
+            "next_4": 5,
+            "next_5": 1,
             "global_loops": 10,
             "skill_dirs": ["right", "up", "up", "up", "left"],
             "share_code": "890169683",
@@ -378,8 +382,8 @@ class FH_UltimateBot(ctk.CTk):
             iv = int(v)
             if iv < 1:
                 iv = 1
-            if iv > 4:
-                iv = 4
+            if iv > 5:
+                iv = 5
             entry_widget.delete(0, "end")
             entry_widget.insert(0, str(iv))
         except Exception:
@@ -414,6 +418,8 @@ class FH_UltimateBot(ctk.CTk):
             try:
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                    if "next_5" not in data:
+                        data["next_4"] = 5
                     self.config.update(data)
             except Exception:
                 pass
@@ -424,6 +430,7 @@ class FH_UltimateBot(ctk.CTk):
             self.config["buy_count"] = int(self.entry_car.get())
             self.config["cj_count"] = int(self.entry_cj.get())
             self.config["sc_count"] = int(self.entry_sc.get())
+            self.config["spin_count"] = int(self.entry_spin.get())
             self.config["global_loops"] = int(self.entry_global_loop.get())
             self.config["share_code"] = "".join(c for c in self.entry_share.get() if c.isdigit())
             #self.config["base_width"] = int(self.entry_base_w.get())
@@ -431,6 +438,7 @@ class FH_UltimateBot(ctk.CTk):
             self.config["next_2"] = int(self.entry_next2.get())
             self.config["next_3"] = int(self.entry_next3.get())
             self.config["next_4"] = int(self.entry_next4.get())
+            self.config["next_5"] = int(self.entry_next5.get())
         except Exception:
             pass
 
@@ -438,6 +446,7 @@ class FH_UltimateBot(ctk.CTk):
         self.config["chk_2"] = self.var_chk2.get()
         self.config["chk_3"] = self.var_chk3.get()
         self.config["chk_4"] = self.var_chk4.get()
+        self.config["chk_5"] = self.var_chk5.get()
         self.config["auto_restart"] = self.var_auto_restart.get()
         self.config["restart_cmd"] = self.le_restart_cmd.get().strip()
         try:
@@ -604,6 +613,7 @@ class FH_UltimateBot(ctk.CTk):
         self.var_chk2 = ctk.BooleanVar(value=self.config["chk_2"])
         self.var_chk3 = ctk.BooleanVar(value=self.config["chk_3"])
         self.var_chk4 = ctk.BooleanVar(value=self.config.get("chk_4", True))
+        self.var_chk5 = ctk.BooleanVar(value=self.config.get("chk_5", True))
 
         box_race, self.btn_race, self.entry_race, self.lbl_race = create_box(
             self.config_frame,
@@ -739,7 +749,20 @@ class FH_UltimateBot(ctk.CTk):
         )
 
         self.next_frame4, self.entry_next4, self.chk4 = create_next_step(
-            self.config_frame, self.var_chk4, self.config.get("next_4", 1)
+            self.config_frame, self.var_chk4, self.config.get("next_4", 5)
+        )
+
+        box_spin, self.btn_spin, self.entry_spin, self.lbl_spin = create_box(
+            self.config_frame,
+            "5. 开抽",
+            "开始",
+            lambda: self.start_pipeline("spin"),
+            "#0E7490",
+            self.config.get("spin_count", 1),
+        )
+
+        self.next_frame5, self.entry_next5, self.chk5 = create_next_step(
+            self.config_frame, self.var_chk5, self.config.get("next_5", 1)
         )
                 # ====== 抽离到底部的全局设置栏 (放在上方) ======
         # 【修改1】把 self.top_container 改成了 self
@@ -820,7 +843,8 @@ class FH_UltimateBot(ctk.CTk):
         self.entry_next1.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next1, 2))
         self.entry_next2.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next2, 3))
         self.entry_next3.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next3, 4))
-        self.entry_next4.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next4, 1))
+        self.entry_next4.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next4, 5))
+        self.entry_next5.bind("<FocusOut>", lambda e: self.normalize_step_entry(self.entry_next5, 1))
 
         if not self.entry_sc.get().strip():
             self.entry_sc.insert(0, "30")
@@ -1242,6 +1266,7 @@ class FH_UltimateBot(ctk.CTk):
         self.car_counter = 0
         self.cj_counter = 0
         self.sc_count = 0
+        self.spin_counter = 0
         self.global_loop_current = 0
 
         def runner():
@@ -1249,7 +1274,7 @@ class FH_UltimateBot(ctk.CTk):
                 self.stop_all()
                 return
 
-            steps = ["race", "buy", "cj", "sell"]
+            steps = ["race", "buy", "cj", "sell", "spin"]
             curr_idx = steps.index(start_step)
 
             try:
@@ -1272,6 +1297,8 @@ class FH_UltimateBot(ctk.CTk):
                         success = self.logic_super_wheelspin(int(self.entry_cj.get()))
                     elif step_name == "sell":
                         success = self.sell_consumable_car(int(self.entry_sc.get()))
+                    elif step_name == "spin":
+                        success = self.logic_consume_wheelspins(int(self.entry_spin.get()))
                 except Exception as e:
                     self.log(f"执行模块 {step_name} 时异常: {e}")
                     success = False
@@ -1290,22 +1317,27 @@ class FH_UltimateBot(ctk.CTk):
                 next_idx = curr_idx + 1 # 默认前往下一步
                 if curr_idx == 0:
                     if self.var_chk1.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next1.get()) - 1))
+                        try: next_idx = max(0, min(4, int(self.entry_next1.get()) - 1))
                         except Exception: next_idx = 1
                     else: break
                 elif curr_idx == 1:
                     if self.var_chk2.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next2.get()) - 1))
+                        try: next_idx = max(0, min(4, int(self.entry_next2.get()) - 1))
                         except Exception: next_idx = 2
                     else: break
                 elif curr_idx == 2:
                     if self.var_chk3.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next3.get()) - 1))
+                        try: next_idx = max(0, min(4, int(self.entry_next3.get()) - 1))
                         except Exception: next_idx = 3
                     else: break
                 elif curr_idx == 3:
                     if self.var_chk4.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next4.get()) - 1))
+                        try: next_idx = max(0, min(4, int(self.entry_next4.get()) - 1))
+                        except Exception: next_idx = 4
+                    else: break
+                elif curr_idx == 4:
+                    if self.var_chk5.get():
+                        try: next_idx = max(0, min(4, int(self.entry_next5.get()) - 1))
                         except Exception: next_idx = 0
                     else: break
 
@@ -1325,6 +1357,7 @@ class FH_UltimateBot(ctk.CTk):
                     self.car_counter = 0
                     self.cj_counter = 0
                     self.sc_count = 0
+                    self.spin_counter = 0
 
                 curr_idx = next_idx
 
@@ -3177,6 +3210,118 @@ class FH_UltimateBot(ctk.CTk):
             self.hw_press("esc")
             time.sleep(1.0)
 
+        return True
+
+    # ==========================================
+    # --- 模块：开抽 ---
+    # ==========================================
+    def wait_for_wheelspin_menu(self, timeout=12):
+        return self.wait_for_any_image(
+            ["SuperWheelSpin.png", "WheelSpin.png"],
+            region=self.regions["全界面"],
+            threshold=0.75,
+            timeout=timeout,
+            interval=0.2,
+            fast_mode=True
+        )
+
+    def consume_single_wheelspin_type(self, spin_image, empty_image, log_name):
+        if not self.is_running:
+            return False
+
+        for attempt in range(500):
+            if not self.is_running:
+                return False
+
+            if self.find_image(empty_image, region=self.regions["全界面"], threshold=0.75, fast_mode=True):
+                self.log(f"{log_name}已用完，确认返回")
+                self.hw_press("enter")
+                time.sleep(1.0)
+                return bool(self.wait_for_wheelspin_menu(timeout=12))
+
+            pos_spin = self.wait_for_image(
+                spin_image,
+                region=self.regions["全界面"],
+                threshold=0.75,
+                timeout=2,
+                interval=0.2,
+                fast_mode=True
+            )
+            if not pos_spin:
+                self.log(f"未找到{log_name}入口，跳过")
+                return True
+
+            self.log(f"开始{log_name} ({attempt + 1})")
+            self.game_click(pos_spin)
+            time.sleep(0.5)
+
+            empty_seen = False
+            menu_seen = False
+            for _ in range(1200):
+                if not self.is_running:
+                    return False
+
+                if self.find_image(empty_image, region=self.regions["全界面"], threshold=0.75, fast_mode=True):
+                    empty_seen = True
+                    break
+
+                if self.find_any_image(["SuperWheelSpin.png", "WheelSpin.png"], region=self.regions["全界面"], threshold=0.75, fast_mode=True):
+                    menu_seen = True
+                    break
+
+                self.hw_press("enter", delay=0.02)
+                time.sleep(0.1)
+
+            if not empty_seen and not menu_seen:
+                self.log(f"{log_name}等待结果超时")
+                return False
+
+            if empty_seen:
+                self.log(f"{log_name}已用完，确认返回")
+                self.hw_press("enter")
+                time.sleep(1.0)
+                return bool(self.wait_for_wheelspin_menu(timeout=12))
+
+            if not self.wait_for_wheelspin_menu(timeout=12):
+                self.log(f"{log_name}后未能返回我的地平线菜单")
+                return False
+
+        self.log(f"{log_name}尝试次数过多，停止")
+        return False
+
+    def logic_consume_wheelspins(self, target_count):
+        if self.spin_counter >= target_count:
+            return True
+
+        self.update_running_ui("开抽", self.spin_counter, target_count)
+
+        self.log("进入菜单")
+        if not self.enter_menu():
+            return False
+
+        self.log("切换到我的地平线")
+        for _ in range(2):
+            self.hw_press("pagedown")
+            time.sleep(0.5)
+
+        if not self.wait_for_wheelspin_menu(timeout=12):
+            self.log("未找到抽奖入口")
+            return False
+
+        if not self.consume_single_wheelspin_type("SuperWheelSpin.png", "NoSuperSpinsLeft.png", "超级抽奖"):
+            return False
+
+        if not self.consume_single_wheelspin_type("WheelSpin.png", "NoSpinsLeft.png", "普通抽奖"):
+            return False
+
+        for _ in range(2):
+            if not self.is_running:
+                return False
+            self.hw_press("pageup")
+            time.sleep(0.5)
+
+        self.spin_counter += 1
+        self.update_running_ui("开抽", self.spin_counter, target_count)
         return True
     #===============================
     #---自动超级抽奖-----
