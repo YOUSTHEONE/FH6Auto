@@ -3211,7 +3211,7 @@ class FH_UltimateBot(ctk.CTk):
                 
 
             brand_pos = self.wait_for_any_image_gray(
-                ["CCbrand.png"],
+                ["CCbrand.png", "CCbrand-b.png"],
                 region=self.regions["全界面"],
                 threshold=0.75,
                 timeout=0.8,
@@ -3347,7 +3347,7 @@ class FH_UltimateBot(ctk.CTk):
                     return False
 
                 brand_pos = self.wait_for_any_image_gray(
-                    ["CCbrand.png"],
+                    ["CCbrand.png", "CCbrand-b.png"],
                     region=self.regions["全界面"],
                     threshold=0.75,
                     timeout=0.8,
@@ -3756,7 +3756,7 @@ class FH_UltimateBot(ctk.CTk):
                 
 
             brand_pos = self.wait_for_any_image_gray(
-                ["CCbrand.png"],
+                ["CCbrand.png", "CCbrand-b.png"],
                 region=self.regions["全界面"],
                 threshold=0.75,
                 timeout=0.8,
@@ -3775,7 +3775,7 @@ class FH_UltimateBot(ctk.CTk):
 
         self.game_click(brand_pos)
         time.sleep(0.8)
-        
+
         self.log("开始删除最近获得的车辆！！！请人工确认是否移除")
         
         not_found_pages = 0  
