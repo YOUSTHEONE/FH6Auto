@@ -6267,16 +6267,8 @@ class FH_UltimateBot(ctk.CTk):
 
         return self.select_first_cr_rival_and_open_car_list()
 
-    def press_cr_filter_down_steps(self, steps):
-        for _ in range(steps):
-            if not self.is_running:
-                return False
-            self.hw_press("down", delay=0.06)
-            time.sleep(0.08)
-        return True
-
     def apply_cr_race_car_fast_filter(self):
-        self.log("刷CR：快速筛选 赛道玩具 + 后轮驱动 + 极限竞速特别版。")
+        self.log("刷CR：快速筛选 赛道玩具（模板匹配）。")
         self.hw_press("y")
         panel_pos = self.wait_for_image(
             "FilterPanel.png",
@@ -6291,15 +6283,88 @@ class FH_UltimateBot(ctk.CTk):
             self.capture_failure_snapshot("cr_fast_filter_panel_not_found", module_name="cr")
             return False
 
+        self.filter_panel_region = self.get_filter_panel_search_region(panel_pos)
+        self.filter_fast_scales = self.get_filter_scales_to_try(
+            strict_verify=self.is_filter_strict_click_verify_enabled()
+        )
+        self.log("刷CR：筛选面板已打开，重置筛选后按模板勾选赛道玩具。")
         self.hw_press("x")
         time.sleep(0.5)
 
-        for label, down_steps in [("赛道玩具", 4), ("后轮驱动", 2), ("极限竞速特别版", 5)]:
-            if not self.press_cr_filter_down_steps(down_steps):
+        self.hw_press("home", delay=0.08)
+        time.sleep(0.25)
+
+        track_toys_templates = [
+            "TrackToysWhiteUnchecked.png",
+            "TrackToysWhiteChecked.png",
+            "TrackToysBlackUnchecked.png",
+            "TrackToysBlackChecked.png",
+        ]
+        scales_to_try = self.filter_fast_scales or self.get_filter_scales_to_try(strict_verify=False)
+        search_region = self.filter_panel_region or self.regions["全界面"]
+
+        track_toys_ok = False
+        for attempt in range(1, 4):
+            if not self.is_running:
                 return False
+
+            row_info = self.find_filter_option_row(
+                track_toys_templates,
+                threshold=0.66,
+                timeout=2.0,
+                region=search_region,
+                scales_to_try=scales_to_try,
+            )
+            if not row_info:
+                self.log(f"刷CR筛选：未找到 赛道玩具 选项 (第{attempt}次)。")
+                time.sleep(0.3)
+                continue
+
+            if self.is_filter_row_checked(row_info):
+                self.log("刷CR筛选：赛道玩具 已勾选。")
+                self.move_mouse_to_desktop_top_left()
+                track_toys_ok = True
+                break
+
+            self.log(f"刷CR筛选：点击勾选 赛道玩具 (第{attempt}次)。")
+            self.game_click(row_info.get("checkbox_pos", row_info["pos"]))
+            self.move_mouse_to_desktop_top_left()
+            time.sleep(0.5)
+
+            row_info = self.find_filter_option_row(
+                track_toys_templates,
+                threshold=0.66,
+                timeout=1.5,
+                region=search_region,
+                scales_to_try=scales_to_try,
+            )
+            if row_info and self.is_filter_row_checked(row_info):
+                self.log("刷CR筛选：赛道玩具 勾选成功。")
+                track_toys_ok = True
+                break
+
+            self.log(f"刷CR筛选：点击未确认，尝试 Enter 兜底 (第{attempt}次)。")
             self.hw_press("enter")
-            time.sleep(0.45)
-            self.log(f"刷CR筛选：已按固定路径勾选 {label}。")
+            time.sleep(0.5)
+
+            row_info = self.find_filter_option_row(
+                track_toys_templates,
+                threshold=0.66,
+                timeout=1.5,
+                region=search_region,
+                scales_to_try=scales_to_try,
+            )
+            if row_info and self.is_filter_row_checked(row_info):
+                self.log("刷CR筛选：赛道玩具 Enter 兜底勾选成功。")
+                track_toys_ok = True
+                break
+
+        if not track_toys_ok:
+            self.log("刷CR筛选：赛道玩具 3次尝试均未确认勾选，回退到全车辆筛选。")
+            self.capture_failure_snapshot("cr_track_toys_filter_failed", module_name="cr")
+            self.hw_press("esc")
+            time.sleep(1.0)
+            return False
 
         self.hw_press("esc")
         time.sleep(3.0)
@@ -6335,6 +6400,17 @@ class FH_UltimateBot(ctk.CTk):
 
     def clear_cr_race_car_filters(self):
         self.log("刷CR：清空筛选后进入慢速兜底扫描。")
+        no_cars_pos = self.find_image(
+            "NoAvailableCars.png",
+            region=self.regions["全界面"],
+            threshold=0.70,
+            fast_mode=True,
+        )
+        if no_cars_pos:
+            self.log("刷CR：检测到没有可用车辆提示，按 Enter 回到完整选车界面。")
+            self.hw_press("enter")
+            time.sleep(2.0)
+
         panel_pos = self.find_image(
             "FilterPanel.png",
             region=self.regions["全界面"],
@@ -6563,48 +6639,50 @@ class FH_UltimateBot(ctk.CTk):
         if not car_list_ready:
             self.log("刷CR：未确认筛选入口，仍尝试快速筛选。")
 
-        car_pos = None
-        fast_filter_success = False
-        fast_scan_stats = {"attempts": 0, "skipped_negative": 0}
-        slow_scan_stats = {"attempts": 0, "skipped_negative": 0}
-
-        fast_filter_success = self.apply_cr_race_car_fast_filter()
-        if fast_filter_success and not self.is_cr_filtered_result_invalid():
-            brand_visible = self.is_cr_target_brand_visible(car_profile, log_on_missing=False)
-            if brand_visible:
-                self.log("刷CR：五菱快筛命中车厂页签，直接选择当前高亮车辆。")
-                self.hw_press("enter")
-                time.sleep(4.0)
-                return True
-
-            car_pos, fast_scan_stats = self.scan_cr_race_car_by_template(
-                car_profile,
-                scan_attempts=3,
-                right_steps=0,
-                template_timeout=0.6,
-                scan_label="五菱快筛当前高亮模板确认",
-            )
-            if car_pos:
-                self.log("刷CR：五菱快筛命中车辆模板，直接选择当前高亮车辆。")
-                self.hw_press("enter")
-                time.sleep(4.0)
-                return True
-
-            self.log("刷CR：五菱快筛未见无车提示，按当前高亮车辆兜底选择。")
-            self.hw_press("enter")
-            time.sleep(4.0)
-            return True
+        # Phase 1: Template scan on current page (no filter, no scroll)
+        self.log(f"刷CR：直接模板匹配查找 {car_profile['label']} 目标车（当前页面）。")
+        car_pos, _ = self.scan_cr_race_car_by_template(
+            car_profile,
+            scan_attempts=1,
+            right_steps=0,
+            template_timeout=1.0,
+            scan_label="当前页面模板识别",
+        )
         if car_pos:
+            self.log(f"刷CR：当前页面命中 {car_profile['label']} 车辆模板。")
             self.game_click(car_pos)
             time.sleep(0.6)
             self.hw_press("enter")
             time.sleep(4.0)
             return True
 
-        self.log("刷CR：快筛未找到目标车或未能打开筛选，切换慢速兜底。")
-        self.clear_cr_race_car_filters()
+        # Phase 2: Not found on first page — PageUp × 3 to jump to last pages
+        self.log(f"刷CR：当前页面未找到 {car_profile['label']}，按 3 次 PageUp 跳转到倒数页面。")
+        for i in range(3):
+            if not self.is_running:
+                return False
+            self.hw_press("pageup", delay=0.12)
+            time.sleep(0.5)
 
-        self.log(f"刷CR：慢速兜底直接查找 {car_profile['label']} 目标车模板。")
+        # Phase 3: Template scan on last pages
+        self.log(f"刷CR：倒数页面模板匹配查找 {car_profile['label']} 目标车。")
+        car_pos, _ = self.scan_cr_race_car_by_template(
+            car_profile,
+            scan_attempts=1,
+            right_steps=0,
+            template_timeout=1.0,
+            scan_label="倒数页面模板识别",
+        )
+        if car_pos:
+            self.log(f"刷CR：倒数页面命中 {car_profile['label']} 车辆模板。")
+            self.game_click(car_pos)
+            time.sleep(0.6)
+            self.hw_press("enter")
+            time.sleep(4.0)
+            return True
+
+        # Phase 4: Slow fallback — 120-attempt right-scroll scan
+        self.log(f"刷CR：倒数页面未找到，切换慢速兜底扫描。")
         car_pos, slow_scan_stats = self.scan_cr_race_car_by_template(
             car_profile,
             scan_attempts=120,
@@ -6623,10 +6701,9 @@ class FH_UltimateBot(ctk.CTk):
                     "car_template": car_profile["car_template"],
                     "car_templates": self.get_cr_race_car_template_candidates(car_profile),
                     "negative_templates": car_profile.get("negative_templates", []),
-                    "fast_filter_success": fast_filter_success,
-                    "fast_scan_attempts": fast_scan_stats.get("attempts", 0),
+                    "scan_attempts": 120,
                     "slow_scan_attempts": slow_scan_stats.get("attempts", 0),
-                    "skipped_negative": fast_scan_stats.get("skipped_negative", 0) + slow_scan_stats.get("skipped_negative", 0),
+                    "skipped_negative": slow_scan_stats.get("skipped_negative", 0),
                 },
             )
             return False
