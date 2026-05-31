@@ -558,6 +558,8 @@ class FH_UltimateBot(ctk.CTk):
         self.config["chk_4"] = self.var_chk4.get()
         self.config["auto_restart"] = self.var_auto_restart.get()
         self.config["restart_cmd"] = self.le_restart_cmd.get().strip()
+        if hasattr(self, "var_4k_experimental"):
+            self.config["enable_4k_experimental"] = bool(self.var_4k_experimental.get())
         if hasattr(self, "var_step_retry_enabled"):
             self.config["step_retry_enabled"] = bool(self.var_step_retry_enabled.get())
         if hasattr(self, "var_filter_strict_click_verify"):
@@ -1397,6 +1399,24 @@ class FH_UltimateBot(ctk.CTk):
         self.le_restart_cmd.insert(0, self.config.get("restart_cmd", "start steam://run/2483190"))
         self.le_restart_cmd.pack(side="left", fill="x", expand=True, padx=(0, 12))
 
+        # 4K 实验适配复选框
+        self.var_4k_experimental = ctk.BooleanVar(value=self.config.get("enable_4k_experimental", False))
+        self.cb_4k_experimental = ctk.CTkCheckBox(
+            self.global_settings_frame,
+            text="4K实验适配",
+            variable=self.var_4k_experimental,
+            width=120,
+            command=self.save_config,
+        )
+        self.cb_4k_experimental.pack(side="left", padx=(15, 5))
+        self.lbl_4k_warning = ctk.CTkLabel(
+            self.global_settings_frame,
+            text="(作者未适配4K，建议先将系统分辨率调为2K后运行)",
+            text_color="#E67E22",
+            font=ctk.CTkFont(size=11),
+        )
+        self.lbl_4k_warning.pack(side="left", padx=(0, 15))
+
         self.pipeline_tip_frame = ctk.CTkFrame(self, fg_color="#2B2418", height=34, corner_radius=8)
         self.pipeline_tip_frame.pack(fill="x", padx=18, pady=(10, 0))
         self.pipeline_tip_frame.pack_propagate(False)
@@ -2028,6 +2048,32 @@ class FH_UltimateBot(ctk.CTk):
         except Exception:
             self.hw_mouse_move(5, 5)
 
+    def is_4k_experimental_enabled(self):
+        """4K实验适配开关，默认关闭。
+        仅在用户主动勾选UI复选框或配置中启用时才生效。"""
+        var_widget = getattr(self, "var_4k_experimental", None)
+        if var_widget is not None:
+            try:
+                return bool(var_widget.get())
+            except Exception:
+                pass
+        return bool(self.config.get("enable_4k_experimental", False))
+
+    def get_resolution_scale(self):
+        """获取当前窗口宽度与基准宽度的缩放比。
+        仅在4K实验模式开启时生效，否则始终返回1.0（保持原有行为不变）。"""
+        if not self.is_4k_experimental_enabled():
+            return 1.0
+        try:
+            full = self.regions.get("全界面")
+            curr_w = full[2] if full else 2560
+            base_w = self.config.get("base_width", 2560)
+            if curr_w > 0 and base_w > 0:
+                return curr_w / base_w
+        except Exception:
+            pass
+        return 1.0
+
     def game_click(self, pos, double=False):
         if not self.is_running or not pos:
             return
@@ -2625,8 +2671,9 @@ class FH_UltimateBot(ctk.CTk):
                         if self.is_running:
                             calc_w = int(w * 0.30)
                             calc_h = int(h * 0.10)
-                            calc_w = max(calc_w, 520)
-                            calc_h = max(calc_h, 120)
+                            rs = self.get_resolution_scale()
+                            calc_w = max(calc_w, int(520 * rs))
+                            calc_h = max(calc_h, int(120 * rs))
                             pos_x = x + w - calc_w - 20
                             pos_y = y + 20
                             self.geometry(f"{calc_w}x{calc_h}+{pos_x}+{pos_y}")
@@ -3812,8 +3859,9 @@ class FH_UltimateBot(ctk.CTk):
 
         calc_w = int(last_w * 0.30)
         calc_h = int(last_h * 0.10)
-        calc_w = max(calc_w, 520)
-        calc_h = max(calc_h, 120)
+        rs = self.get_resolution_scale()
+        calc_w = max(calc_w, int(520 * rs))
+        calc_h = max(calc_h, int(120 * rs))
 
         pos_x = last_x + last_w - calc_w - 20
         pos_y = last_y + 20
@@ -3930,146 +3978,191 @@ class FH_UltimateBot(ctk.CTk):
         self.global_loop_current = 0
 
         def runner():
-            if not self.check_and_focus_game():
-                self.stop_all()
-                return
+            pipeline_success = False
 
-            self.start_process_guard_thread()
+            def execute_pipeline():
+                steps = ["race", "buy", "cj", "sell"]
+                curr_idx = steps.index(start_step)
 
-            steps = ["race", "buy", "cj", "sell"]
-            curr_idx = steps.index(start_step)
+                try:
+                    total_loops = int(self.entry_global_loop.get())
+                except Exception:
+                    total_loops = self.config.get("global_loops", 10)
+                self.global_loop_current = 1
+                self.pipeline_next_step_override = None
+                if hasattr(self, "lbl_mini_loop"):
+                    self.ui_call(self.lbl_mini_loop.configure, text=f"大循环: {self.global_loop_current} / {total_loops}")
+                while self.is_running:
+                    step_name = steps[curr_idx]
+                    step_success = False
+                    self.current_step_name = step_name
+                    self.clear_failure_context()
+
+                    if self.should_abort_for_process_loss({"check_point": "before_step", "step_name": step_name}):
+                        step_success = False
+                    else:
+                        try:
+                            if step_name == "race":
+                                step_success = self.execute_verified_step(
+                                    "循环跑图模块",
+                                    lambda: self.logic_race(int(self.entry_race.get())),
+                                    retry_count=self.get_config_int("general_step_retry_count", 2),
+                                )
+                            elif step_name == "buy":
+                                step_success = self.execute_verified_step(
+                                    "批量买车模块",
+                                    lambda: self.logic_buy_car(int(self.entry_car.get())),
+                                    retry_count=self.get_config_int("general_step_retry_count", 2),
+                                )
+                            elif step_name == "cj":
+                                step_success = self.execute_verified_step(
+                                    "超级抽奖模块",
+                                    lambda: self.logic_super_wheelspin(int(self.entry_cj.get())),
+                                    retry_count=self.get_config_int("general_step_retry_count", 2),
+                                )
+                            elif step_name == "sell":
+                                step_success = self.execute_verified_step(
+                                    "移除车辆模块",
+                                    lambda: self.sell_consumable_car(int(self.entry_sc.get())),
+                                    retry_count=self.get_config_int("general_step_retry_count", 2),
+                                )
+                        except Exception as e:
+                            self.log(f"执行模块 {step_name} 时异常: {e}")
+                            self.set_failure_context(
+                                "module_exception",
+                                {
+                                    "exception": str(e),
+                                    "traceback": traceback.format_exc(),
+                                },
+                            )
+                            step_success = False
+
+                    if not self.is_running:
+                        return False
+
+                    if step_success and self.should_abort_for_process_loss({"check_point": "after_step", "step_name": step_name}):
+                        step_success = False
+
+                    if not step_success:
+                        failure_context = self.last_failure_context or {
+                            "reason": "module_failed",
+                            "details": {"message": "模块返回 False"},
+                        }
+                        snapshot_info = self.capture_failure_snapshot(
+                            failure_context.get("reason", "module_failed"),
+                            module_name=step_name,
+                            details=failure_context.get("details"),
+                        )
+                        if self.attempt_recovery():
+                            self.process_lost_event.clear()
+                            self.start_process_guard_thread()
+                            self.clear_failure_context()
+                            self.log_recovery(f"恢复完成，重新进入 {step_name} 模块。")
+                            continue
+                        else:
+                            self.log("致命错误：断点恢复失败，彻底停止。")
+                            self.log_error_report_guidance(snapshot_info)
+                            return False
+                    #v1.0.1
+                    # ====== 核心流转与无限循环逻辑 ======
+                    next_idx = curr_idx + 1 # 默认前往下一步
+                    override_step = self.pipeline_next_step_override
+                    self.pipeline_next_step_override = None
+                    if override_step in steps:
+                        next_idx = steps.index(override_step)
+                        self.log(f"流水线按业务分支跳转到 {override_step} 模块。")
+                        curr_idx = next_idx
+                        continue
+
+                    if curr_idx == 0:
+                        if self.var_chk1.get():
+                            try: next_idx = max(0, min(3, int(self.entry_next1.get()) - 1))
+                            except Exception: next_idx = 1
+                        else: break
+                    elif curr_idx == 1:
+                        if self.var_chk2.get():
+                            try: next_idx = max(0, min(3, int(self.entry_next2.get()) - 1))
+                            except Exception: next_idx = 2
+                        else: break
+                    elif curr_idx == 2:
+                        if self.var_chk3.get():
+                            try: next_idx = max(0, min(3, int(self.entry_next3.get()) - 1))
+                            except Exception: next_idx = 3
+                        else: break
+                    elif curr_idx == 3:
+                        if self.var_chk4.get():
+                            try: next_idx = max(0, min(3, int(self.entry_next4.get()) - 1))
+                            except Exception: next_idx = 0
+                        else: break
+
+                    if next_idx <= curr_idx:
+                        self.global_loop_current += 1
+
+                        if self.global_loop_current > total_loops:
+                            self.log("达到设定的总循环次数，任务圆满结束。")
+                            break
+
+                        self.log(f"开启新一轮大循环 ({self.global_loop_current}/{total_loops})")
+
+                        if hasattr(self, "lbl_mini_loop"):
+                            self.ui_call(self.lbl_mini_loop.configure, text=f"大循环: {self.global_loop_current} / {total_loops}")
+
+                        self.race_counter = 0
+                        self.car_counter = 0
+                        self.cj_counter = 0
+                        self.sc_count = 0
+
+                    curr_idx = next_idx
+
+                return True
 
             try:
-                total_loops = int(self.entry_global_loop.get())
-            except Exception:
-                total_loops = self.config.get("global_loops", 10)
-            self.global_loop_current = 1
-            self.pipeline_next_step_override = None
-            if hasattr(self, "lbl_mini_loop"):
-                self.ui_call(self.lbl_mini_loop.configure, text=f"大循环: {self.global_loop_current} / {total_loops}")
-            while self.is_running:
-                step_name = steps[curr_idx]
-                success = False
-                self.current_step_name = step_name
-                self.clear_failure_context()
-
-                if self.should_abort_for_process_loss({"check_point": "before_step", "step_name": step_name}):
-                    success = False
-                else:
-                    try:
-                        if step_name == "race":
-                            success = self.execute_verified_step(
-                                "循环跑图模块",
-                                lambda: self.logic_race(int(self.entry_race.get())),
-                                retry_count=self.get_config_int("general_step_retry_count", 2),
-                            )
-                        elif step_name == "buy":
-                            success = self.execute_verified_step(
-                                "批量买车模块",
-                                lambda: self.logic_buy_car(int(self.entry_car.get())),
-                                retry_count=self.get_config_int("general_step_retry_count", 2),
-                            )
-                        elif step_name == "cj":
-                            success = self.execute_verified_step(
-                                "超级抽奖模块",
-                                lambda: self.logic_super_wheelspin(int(self.entry_cj.get())),
-                                retry_count=self.get_config_int("general_step_retry_count", 2),
-                            )
-                        elif step_name == "sell":
-                            success = self.execute_verified_step(
-                                "移除车辆模块",
-                                lambda: self.sell_consumable_car(int(self.entry_sc.get())),
-                                retry_count=self.get_config_int("general_step_retry_count", 2),
-                            )
-                    except Exception as e:
-                        self.log(f"执行模块 {step_name} 时异常: {e}")
-                        self.set_failure_context(
-                            "module_exception",
-                            {
-                                "exception": str(e),
-                                "traceback": traceback.format_exc(),
-                            },
-                        )
-                        success = False
-
-                if not self.is_running:
-                    break
-
-                if success and self.should_abort_for_process_loss({"check_point": "after_step", "step_name": step_name}):
-                    success = False
-
-                if not success:
+                if not self.check_and_focus_game():
+                    return
+                self.start_process_guard_thread()
+                pipeline_success = execute_pipeline()
+            except Exception as e:
+                self.log(f"流水线异常: {e}")
+                self.set_failure_context(
+                    "pipeline_exception",
+                    {"exception": str(e), "traceback": traceback.format_exc()},
+                )
+            finally:
+                while self.is_running and not pipeline_success:
                     failure_context = self.last_failure_context or {
-                        "reason": "module_failed",
-                        "details": {"message": "模块返回 False"},
+                        "reason": "pipeline_failed",
+                        "details": {"message": "流水线未成功完成"},
                     }
                     snapshot_info = self.capture_failure_snapshot(
-                        failure_context.get("reason", "module_failed"),
-                        module_name=step_name,
+                        failure_context.get("reason", "pipeline_failed"),
+                        module_name="pipeline",
                         details=failure_context.get("details"),
                     )
                     if self.attempt_recovery():
                         self.process_lost_event.clear()
                         self.start_process_guard_thread()
                         self.clear_failure_context()
-                        self.log_recovery(f"恢复完成，重新进入 {step_name} 模块。")
+                        self.log_recovery("流水线恢复完成，重新进入流水线。")
+                        self.race_counter = 0
+                        self.car_counter = 0
+                        self.cj_counter = 0
+                        self.sc_count = 0
+                        self.global_loop_current = 0
+                        try:
+                            pipeline_success = execute_pipeline()
+                        except Exception as e2:
+                            self.log(f"流水线恢复后异常: {e2}")
+                            self.set_failure_context(
+                                "pipeline_exception",
+                                {"exception": str(e2), "traceback": traceback.format_exc()},
+                            )
                         continue
-                    else:
-                        self.log("致命错误：断点恢复失败，彻底停止。")
-                        self.log_error_report_guidance(snapshot_info)
-                        break
-                #v1.0.1
-                # ====== 核心流转与无限循环逻辑 ======
-                next_idx = curr_idx + 1 # 默认前往下一步
-                override_step = self.pipeline_next_step_override
-                self.pipeline_next_step_override = None
-                if override_step in steps:
-                    next_idx = steps.index(override_step)
-                    self.log(f"流水线按业务分支跳转到 {override_step} 模块。")
-                    curr_idx = next_idx
-                    continue
 
-                if curr_idx == 0:
-                    if self.var_chk1.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next1.get()) - 1))
-                        except Exception: next_idx = 1
-                    else: break
-                elif curr_idx == 1:
-                    if self.var_chk2.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next2.get()) - 1))
-                        except Exception: next_idx = 2
-                    else: break
-                elif curr_idx == 2:
-                    if self.var_chk3.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next3.get()) - 1))
-                        except Exception: next_idx = 3
-                    else: break
-                elif curr_idx == 3:
-                    if self.var_chk4.get():
-                        try: next_idx = max(0, min(3, int(self.entry_next4.get()) - 1))
-                        except Exception: next_idx = 0
-                    else: break
+                    self.log("流水线恢复失败，停止任务。")
+                    self.log_error_report_guidance(snapshot_info)
+                    break
 
-                if next_idx <= curr_idx:
-                    self.global_loop_current += 1
-                    
-                    if self.global_loop_current > total_loops:
-                        self.log("达到设定的总循环次数，任务圆满结束。")
-                        break
-                        
-                    self.log(f"开启新一轮大循环 ({self.global_loop_current}/{total_loops})")
-                    
-                    if hasattr(self, "lbl_mini_loop"):
-                        self.ui_call(self.lbl_mini_loop.configure, text=f"大循环: {self.global_loop_current} / {total_loops}")
-
-                    self.race_counter = 0
-                    self.car_counter = 0
-                    self.cj_counter = 0
-                    self.sc_count = 0
-                
-                curr_idx = next_idx
-
-            self.stop_all()
+                self.stop_all()
 
         self.current_thread = threading.Thread(target=runner, daemon=True)
         self.current_thread.start()
@@ -4093,13 +4186,17 @@ class FH_UltimateBot(ctk.CTk):
 
         def runner():
             press_count = 0
+            success = False
             try:
                 if not self.check_and_focus_game():
                     return
 
+                self.start_process_guard_thread()
                 self.log("自动超级抽奖已启动：请保持在超级抽奖界面，F8 或停止按钮结束。")
                 next_press_at = time.time()
                 while self.is_running:
+                    if self.should_abort_for_process_loss({"check_point": "auto_cj_loop"}):
+                        break
                     self.hw_press("enter", delay=0.04)
                     press_count += 1
                     self.update_running_ui("自动超级抽奖", press_count, 0)
@@ -4108,7 +4205,10 @@ class FH_UltimateBot(ctk.CTk):
                     sleep_seconds = max(0.0, next_press_at - time.time())
                     sleep_end = time.time() + sleep_seconds
                     while self.is_running and time.time() < sleep_end:
+                        if self.should_abort_for_process_loss({"check_point": "auto_cj_loop_sleep"}):
+                            break
                         time.sleep(0.02)
+                success = True
             except Exception as e:
                 self.log(f"自动超级抽奖异常: {e}")
                 self.set_failure_context(
@@ -4119,6 +4219,51 @@ class FH_UltimateBot(ctk.CTk):
                     },
                 )
             finally:
+                while self.is_running and not success:
+                    failure_context = self.last_failure_context or {
+                        "reason": "auto_super_wheelspin_failed",
+                        "details": {"message": "自动超级抽奖流程未成功完成"},
+                    }
+                    snapshot_info = self.capture_failure_snapshot(
+                        failure_context.get("reason", "auto_super_wheelspin_failed"),
+                        module_name="cj",
+                        details=failure_context.get("details"),
+                    )
+                    if self.attempt_recovery():
+                        self.process_lost_event.clear()
+                        self.start_process_guard_thread()
+                        self.clear_failure_context()
+                        self.log_recovery("自动超级抽奖恢复完成，重新进入抽奖流程。")
+                        press_count = 0
+                        try:
+                            self.log("自动超级抽奖已启动：请保持在超级抽奖界面，F8 或停止按钮结束。")
+                            next_press_at = time.time()
+                            while self.is_running:
+                                if self.should_abort_for_process_loss({"check_point": "auto_cj_loop"}):
+                                    break
+                                self.hw_press("enter", delay=0.04)
+                                press_count += 1
+                                self.update_running_ui("自动超级抽奖", press_count, 0)
+                                next_press_at += 1.0 / 6.0
+                                sleep_seconds = max(0.0, next_press_at - time.time())
+                                sleep_end = time.time() + sleep_seconds
+                                while self.is_running and time.time() < sleep_end:
+                                    if self.should_abort_for_process_loss({"check_point": "auto_cj_loop_sleep"}):
+                                        break
+                                    time.sleep(0.02)
+                            success = True
+                        except Exception as e2:
+                            self.log(f"自动超级抽奖恢复后异常: {e2}")
+                            self.set_failure_context(
+                                "auto_super_wheelspin_exception",
+                                {"exception": str(e2), "traceback": traceback.format_exc()},
+                            )
+                        continue
+
+                    self.log("自动超级抽奖恢复失败，停止任务。")
+                    self.log_error_report_guidance(snapshot_info)
+                    break
+
                 self.stop_all()
 
         self.current_thread = threading.Thread(target=runner, daemon=True)
@@ -5233,10 +5378,12 @@ class FH_UltimateBot(ctk.CTk):
         try:
             gx, gy, gw, gh = self.regions["全界面"]
             px, py = panel_pos
-            region_w = min(gw, max(720, int(gw * 0.34)))
-            region_h = min(gh, max(720, int(gh * 0.70)))
+            rs = self.get_resolution_scale()
+            min_wh = int(720 * rs)
+            region_w = min(gw, max(min_wh, int(gw * 0.34)))
+            region_h = min(gh, max(min_wh, int(gh * 0.70)))
             x1 = max(gx, min(gx + gw - region_w, int(px - region_w // 2)))
-            y1 = max(gy, min(gy + gh - region_h, int(py - 115)))
+            y1 = max(gy, min(gy + gh - region_h, int(py - int(115 * rs))))
             return (x1, y1, region_w, region_h)
         except Exception:
             return self.regions["全界面"]
@@ -5275,6 +5422,9 @@ class FH_UltimateBot(ctk.CTk):
                                 left = int(left - 28 * scale)
                                 row_width = max(tw, expected_width)
                                 row_height = max(th, int(54 * scale))
+                                # 安全钳制：防止在极端缩放下行宽超出屏幕范围
+                                max_screen_w = self.regions["全界面"][2] if self.regions.get("全界面") else 3840
+                                row_width = min(row_width, max_screen_w)
                             checkbox_size = max(18, min(42, int(row_height * 0.52)))
                             checkbox_x = left + row_width - max(24, int(row_height * 0.72))
                             checkbox_y = top + row_height // 2
