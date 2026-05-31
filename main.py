@@ -3477,7 +3477,7 @@ class FH_UltimateBot(ctk.CTk):
                 
 
             brand_pos = self.wait_for_any_image_gray(
-                ["CCbrand.png"],
+                ["CCbrand-w.png", "CCbrand-b.png"],
                 region=self.regions["全界面"],
                 threshold=0.75,
                 timeout=0.8,
@@ -3613,7 +3613,7 @@ class FH_UltimateBot(ctk.CTk):
                     return False
 
                 brand_pos = self.wait_for_any_image_gray(
-                    ["CCbrand.png"],
+                    ["CCbrand-w.png", "CCbrand-b.png"],
                     region=self.regions["全界面"],
                     threshold=0.75,
                     timeout=0.8,
@@ -4022,7 +4022,7 @@ class FH_UltimateBot(ctk.CTk):
                 
 
             brand_pos = self.wait_for_any_image_gray(
-                ["CCbrand.png"],
+                ["CCbrand-w.png", "CCbrand-b.png"],
                 region=self.regions["全界面"],
                 threshold=0.75,
                 timeout=0.8,
