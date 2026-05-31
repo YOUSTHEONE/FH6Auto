@@ -3002,6 +3002,118 @@ class FH_UltimateBot(ctk.CTk):
     # ==========================================
     # --- 模块：移除车辆 ---
     # ==========================================
+    def get_region_around_point(self, point, width_ratio=0.26, height_ratio=0.28):
+        gx, gy, gw, gh = self.regions["全界面"]
+        px, py = point
+        region_w = max(240, int(gw * width_ratio))
+        region_h = max(180, int(gh * height_ratio))
+        x1 = max(gx, min(gx + gw - region_w, int(px - region_w / 2)))
+        y1 = max(gy, min(gy + gh - region_h, int(py - region_h / 2)))
+        return (x1, y1, region_w, region_h)
+
+    def get_sell_detail_panel_region(self):
+        gx, gy, gw, gh = self.regions["全界面"]
+        return (gx, gy, max(260, int(gw * 0.24)), gh)
+
+    def find_sell_target_22b_card(self):
+        identity_templates = [
+            "sell_22b_card_full.png",
+            "sell_22b_car_crop.png",
+            "sell_22b_title.png",
+        ]
+        required_templates = [
+            "sell_b600.png",
+            "sell_legendary_orange.png",
+        ]
+
+        for scan_round in range(30):
+            if not self.is_running:
+                return None
+
+            identity_pos = self.wait_for_any_image(
+                identity_templates,
+                region=self.regions["全界面"],
+                threshold=0.82,
+                timeout=0.6,
+                interval=0.15,
+                fast_mode=False,
+            )
+            identity_hit = identity_pos is not None
+            if identity_hit:
+                card_region = self.get_region_around_point(identity_pos)
+                required_hits = 0
+                for template_name in required_templates:
+                    if self.find_image(template_name, region=card_region, threshold=0.80, fast_mode=True):
+                        required_hits += 1
+
+                if required_hits >= 2:
+                    self.log(f"删车：识别到 22B 候选卡片 (round {scan_round + 1})。")
+                    return identity_pos
+
+            self.hw_press("right")
+            time.sleep(0.08)
+
+        self.log("列表中未找到满足 22B + B600 + 传奇 条件的目标车辆")
+        return None
+
+    def verify_sell_target_detail_panel(self):
+        detail_region = self.get_sell_detail_panel_region()
+        detail_checks = [
+            ("斯巴鲁标识", "sell_detail_subaru_logo.png", 0.76),
+            ("传奇", "sell_detail_legendary_orange.png", 0.78),
+            ("B 600", "sell_detail_b600.png", 0.78),
+            ("CR 86,000", "sell_detail_price_86000.png", 0.78),
+        ]
+
+        detail_hits = 0
+        for label, template_name, threshold in detail_checks:
+            if self.find_image(template_name, region=detail_region, threshold=threshold, fast_mode=True):
+                detail_hits += 1
+            else:
+                self.log(f"删车：左侧详情校验失败，未识别到 {label}。")
+
+        if detail_hits == len(detail_checks):
+            self.log("删车：左侧详情校验通过，确认目标为斯巴鲁 22B B600 传奇 CR 86,000。")
+            return True
+
+        self.log("删车：左侧详情校验未通过，停止以避免误删。")
+        return False
+
+    def remove_selected_verified_sell_car(self):
+        self.hw_press("enter")
+        time.sleep(1.0)
+
+        remove_pos = self.wait_for_any_image(
+            ["sell_remove_button_white.png", "sell_remove_button_black.png"],
+            region=self.regions["全界面"],
+            threshold=0.76,
+            timeout=4,
+            interval=0.25,
+            fast_mode=True,
+        )
+        if not remove_pos:
+            self.log("未识别到从车库移除按钮，停止以避免误删")
+            return False
+
+        self.game_click(remove_pos)
+        time.sleep(0.8)
+
+        confirm_pos = self.wait_for_any_image(
+            ["sell_remove_confirm_yes_white.png", "sell_remove_confirm_yes_black.png"],
+            region=self.regions["全界面"],
+            threshold=0.76,
+            timeout=4,
+            interval=0.25,
+            fast_mode=True,
+        )
+        if not confirm_pos:
+            self.log("未识别到移除确认按钮，停止以避免误删")
+            return False
+
+        self.game_click(confirm_pos)
+        time.sleep(2.0)
+        return True
+
     def sell_consumable_car(self, target_count):
         # 如果后续你单独增加 sell_counter，建议把 cj_counter 全部替换掉
         if self.sc_count >= target_count:
