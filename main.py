@@ -3068,6 +3068,7 @@ class FH_UltimateBot(ctk.CTk):
                 if required_hits >= 2:
                     self.log(f"删车：识别到 22B 候选卡片 (round {scan_round + 1})。")
                     return identity_pos
+                self.log(f"删车：22B 候选未通过 B600/传奇复核，命中数 {required_hits}/2。")
 
             if not self.is_running:
                 return None
