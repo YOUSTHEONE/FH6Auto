@@ -2528,8 +2528,7 @@ class FH_UltimateBot(ctk.CTk):
                         color_score * 0.30 +
                         gray_score * 0.20 +
                         edge_score * 0.20 +
-                        center_score * 0.15 +
-                        like_score * 0.15
+                        center_score * 0.30
                     )
 
                     curr_pos = (
@@ -3211,7 +3210,7 @@ class FH_UltimateBot(ctk.CTk):
             fast_mode=True,
             main_threshold=0.75,
             like_threshold=0.7,
-            final_threshold=0.7,
+            final_threshold=0.75,
             timeout=2,
             interval=0.25
         )
@@ -3250,7 +3249,7 @@ class FH_UltimateBot(ctk.CTk):
                     region=self.regions["全界面"],
                     main_threshold=0.75,
                     like_threshold=0.7,
-                    final_threshold=0.7,
+                    final_threshold=0.75,
                     timeout=2,
                     interval=0.25,
                     fast_mode=True
@@ -3656,7 +3655,7 @@ class FH_UltimateBot(ctk.CTk):
                     region=self.regions["全界面"],
                     main_threshold=0.75,   # 防HDR核心：第一道门槛放低
                     like_threshold=0.75,
-                    final_threshold=0.70,
+                    final_threshold=0.75,
                     timeout=1.5,
                     interval=0.2,
                     fast_mode=True
