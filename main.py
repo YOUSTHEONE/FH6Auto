@@ -1950,7 +1950,7 @@ class FH_UltimateBot(ctk.CTk):
             self.log(f"未在主菜单，按下 ESC... ({i + 1}/60)")
             self.hw_press("esc")
             # 给游戏一点动画加载时间
-            time.sleep(1.0)
+            time.sleep(3.0)
             
         self.log("60 次 ESC 尝试均未进入菜单，请检查游戏状态。")
         return False
