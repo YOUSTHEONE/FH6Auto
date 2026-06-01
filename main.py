@@ -59,7 +59,7 @@ CACHE_DIR = os.path.join(APP_DIR, "cache")
 TEMPLATE_CACHE_FILE = os.path.join(CACHE_DIR, "template_cache.pkl")
 TEMPLATE_META_FILE = os.path.join(CACHE_DIR, "template_meta.json")
 DIAGNOSTICS_DIR = os.path.join(APP_DIR, "diagnostics")
-CURRENT_VERSION = "1.1.9"
+CURRENT_VERSION = "1.1.10"
 APP_DISPLAY_NAME = "FH6Auto by YSTO | 深度优化 SArB1e"
 ORIGINAL_AUTHOR_NAME = "原作者 YSTO"
 OPTIMIZER_NAME = "深度优化者 SArB1e"
@@ -382,6 +382,7 @@ class FH_UltimateBot(ctk.CTk):
             "like_guard_enabled": True,
             "like_guard_stall_seconds": 180,
             "like_guard_max_prompt_passes": 3,
+            "skip_startup_prompts": False,
         }
         self.load_config()
 
@@ -393,6 +394,7 @@ class FH_UltimateBot(ctk.CTk):
         self.log(f"当前刷图车辆：{self.get_race_car_display_text()}")
         self.log("启动前先将键盘设置为【英文键盘】")
         self.log("游戏设置为【难度所向披靡】【自动转向】【自动挡】，游戏语言设置为【简体中文】")
+        self.log("重要提醒：脚本会通过【设计与喷漆】页面快速选车，请提前进入该界面并将提示弹窗选择【不再显示此消息】。")
         self.log("大部分以图像识别作为引导，减少机器盲目操作的风险，但仍无法完全避免，使用前请做好准备")
         self.protocol("WM_DELETE_WINDOW", self.on_app_close)
         self.after(1000, self.start_process_guard_thread)
@@ -566,6 +568,8 @@ class FH_UltimateBot(ctk.CTk):
             self.config["filter_strict_click_verify"] = bool(self.var_filter_strict_click_verify.get())
         if hasattr(self, "var_like_guard_enabled"):
             self.config["like_guard_enabled"] = bool(self.var_like_guard_enabled.get())
+        if hasattr(self, "var_skip_startup_prompts"):
+            self.config["skip_startup_prompts"] = bool(self.var_skip_startup_prompts.get())
         if hasattr(self, "entry_like_guard_stall_seconds"):
             self.config["like_guard_stall_seconds"] = self.get_positive_entry_value(
                 self.entry_like_guard_stall_seconds,
@@ -1428,6 +1432,14 @@ class FH_UltimateBot(ctk.CTk):
             command=self.save_config,
         )
         self.cb_like_guard.pack(side="right", padx=(8, 14))
+        self.var_skip_startup_prompts = ctk.BooleanVar(value=self.config.get("skip_startup_prompts", False))
+        self.cb_skip_startup_prompts = ctk.CTkCheckBox(
+            self.pipeline_tip_frame,
+            text="跳过启动提示",
+            variable=self.var_skip_startup_prompts,
+            command=self.save_config,
+        )
+        self.cb_skip_startup_prompts.pack(side="right", padx=(8, 0))
         self.entry_like_guard_stall_seconds = ctk.CTkEntry(self.pipeline_tip_frame, width=54, height=24, justify="center")
         self.entry_like_guard_stall_seconds.insert(0, str(self.config.get("like_guard_stall_seconds", 180)))
         self.entry_like_guard_stall_seconds.pack(side="right", padx=(4, 0))
@@ -3771,6 +3783,7 @@ class FH_UltimateBot(ctk.CTk):
 
         max_passes = self.get_like_guard_max_prompt_passes()
         handled_count = 0
+        anchor_snapshot_saved = False
         for attempt in range(1, max_passes + 1):
             if not self.is_running:
                 break
@@ -3783,6 +3796,17 @@ class FH_UltimateBot(ctk.CTk):
                 self.log(
                     f"点赞检测：{context} 疑似点赞弹窗，但只命中 {candidate.get('template')}，未点击点踩/取消。"
                 )
+                if not anchor_snapshot_saved:
+                    self.capture_failure_snapshot(
+                        "like_prompt_like_button_not_found",
+                        module_name="like_guard",
+                        details={
+                            "context": context,
+                            "matched_template": candidate.get("template"),
+                            "message": "疑似点赞弹窗但未命中点赞按钮模板",
+                        },
+                    )
+                    anchor_snapshot_saved = True
                 break
 
             self.log(
@@ -3791,7 +3815,25 @@ class FH_UltimateBot(ctk.CTk):
             )
             self.game_click(candidate.get("pos"))
             handled_count += 1
-            if not self.wait_with_running(1.2):
+            if not self.wait_with_running(0.8):
+                break
+
+            still_prompt = self.find_like_prompt_candidate(region=self.regions["全界面"])
+            if not still_prompt:
+                continue
+
+            self.log(
+                f"点赞检测：{context} 点击后仍检测到 {still_prompt.get('template')}，补按 Enter 确认。"
+            )
+            self.hw_press("enter")
+            if not self.wait_with_running(1.0):
+                break
+
+            still_prompt = self.find_like_prompt_candidate(region=self.regions["全界面"])
+            if still_prompt:
+                self.log(
+                    f"点赞检测：{context} Enter 兜底后仍检测到 {still_prompt.get('template')}，停止本轮点赞处理。"
+                )
                 break
 
         if handled_count:
@@ -3898,8 +3940,22 @@ class FH_UltimateBot(ctk.CTk):
         self.start_time = time.time()
         self.update_timer()
 
+    def should_skip_startup_prompts(self, prompt_name):
+        var_widget = getattr(self, "var_skip_startup_prompts", None)
+        try:
+            enabled = bool(var_widget.get()) if var_widget is not None else bool(self.config.get("skip_startup_prompts", False))
+        except Exception:
+            enabled = bool(self.config.get("skip_startup_prompts", False))
+
+        if enabled:
+            self.log(f"已按设置跳过启动提示弹窗：{prompt_name}")
+        return enabled
+
     def confirm_pipeline_requirements(self, start_step):
         if start_step not in {"race", "buy", "cj", "sell"}:
+            return True
+
+        if self.should_skip_startup_prompts("启动前强提示"):
             return True
 
         warning = (
@@ -3918,6 +3974,7 @@ class FH_UltimateBot(ctk.CTk):
             "9. 转向已改为【自动转向】。\n"
             "10. 换挡已改为【自动挡】。\n\n"
             "11. 建议首次进入【设计与喷漆】时，将默认提示勾选【不再显示此消息】，可提高脚本稳定性和执行效率。\n\n"
+            "12. 脚本会通过【设计与喷漆】页面快速选车；为保证选车正常，请提前手动进入该界面，并将进入时触发的提示弹窗选择【不再显示此消息】。\n\n"
             "【旧版兼容提醒】\n"
             "如果你继续使用旧模板/旧蓝图，请自行确认车辆、调教、蓝图与当前模板匹配。\n\n"
             "【移除车辆重要提醒】\n"
@@ -3936,12 +3993,16 @@ class FH_UltimateBot(ctk.CTk):
             return True
 
     def confirm_cr_grind_requirements(self):
+        if self.should_skip_startup_prompts("刷CR点启动前强提醒"):
+            return True
+
         warning = (
             "刷CR点启动前强提醒：\n\n"
             "1. 五菱、丰田两辆刷CR点车辆必须保持【出场涂装】，不要换涂装。\n"
             "2. 如果想让 CR 点收益最高，可以把驾驶辅助预设直接调整到【终极】，这样能获取最多 CR 点奖励。\n"
             "3. 建议提前给刷CR点车辆调教点赞，避免周期结算后弹出点赞窗口卡住流程。\n"
-            "4. 如果后续还要继续刷技术点，记得把设置改回【自动挡】和【自动转向】。\n\n"
+            "4. 如果后续还要继续刷技术点，记得把设置改回【自动挡】和【自动转向】。\n"
+            "5. 脚本其他流水线会通过【设计与喷漆】页面快速选车；为保证后续选车正常，请提前手动进入该界面，并将进入时触发的提示弹窗选择【不再显示此消息】。\n\n"
             "确认已经处理好后再继续启动刷CR点。"
         )
         try:
@@ -3951,11 +4012,15 @@ class FH_UltimateBot(ctk.CTk):
             return True
 
     def confirm_auto_super_wheelspin_requirements(self):
+        if self.should_skip_startup_prompts("自动超级抽奖启动前强提醒"):
+            return True
+
         warning = (
             "自动超级抽奖启动前强提醒：\n\n"
             "1. 请先手动打开游戏里的【超级抽奖】页面。\n"
             "2. 当前脚本只负责高频按 Enter 快速抽奖，不负责自动进入页面或智能识别奖励。\n"
-            "3. 智能超级抽奖功能正在开发中。\n\n"
+            "3. 智能超级抽奖功能正在开发中。\n"
+            "4. 脚本其他流水线会通过【设计与喷漆】页面快速选车；为保证后续选车正常，请提前手动进入该界面，并将进入时触发的提示弹窗选择【不再显示此消息】。\n\n"
             "确认已经停留在超级抽奖页面后再继续启动。"
         )
         try:
@@ -3966,6 +4031,9 @@ class FH_UltimateBot(ctk.CTk):
 
     def confirm_pipeline_final_check(self):
         """强提醒之后追加的最终确认，提示用户检查关键设置。"""
+        if self.should_skip_startup_prompts("最终确认"):
+            return True
+
         warning = (
             "⚠ 最终确认：\n\n"
             "1. 请根据上方日志提示，确认已选择正确的车辆和调教。\n"
@@ -3973,7 +4041,8 @@ class FH_UltimateBot(ctk.CTk):
             "3. 确认车辆调教已点赞。\n"
             "4. 确认游戏难度已设为【所向披靡】。\n"
             "5. 确认【自动转向】已开启。\n"
-            "6. 确认【自动换挡】已开启。\n\n"
+            "6. 确认【自动换挡】已开启。\n"
+            "7. 确认已提前进入【设计与喷漆】页面，并将提示弹窗选择【不再显示此消息】。\n\n"
             "以上全部确认无误后再启动！"
         )
         try:
