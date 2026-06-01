@@ -59,7 +59,7 @@ CACHE_DIR = os.path.join(APP_DIR, "cache")
 TEMPLATE_CACHE_FILE = os.path.join(CACHE_DIR, "template_cache.pkl")
 TEMPLATE_META_FILE = os.path.join(CACHE_DIR, "template_meta.json")
 DIAGNOSTICS_DIR = os.path.join(APP_DIR, "diagnostics")
-CURRENT_VERSION = "1.1.7"
+CURRENT_VERSION = "1.1.8"
 APP_DISPLAY_NAME = "FH6Auto by YSTO | 深度优化 SArB1e"
 ORIGINAL_AUTHOR_NAME = "原作者 YSTO"
 OPTIMIZER_NAME = "深度优化者 SArB1e"
@@ -4673,9 +4673,11 @@ class FH_UltimateBot(ctk.CTk):
             stall_timeout = max(1, int(self.config.get("race_stall_timeout_seconds", 60)))
             restart_timeout = max(stall_timeout, int(self.config.get("race_restart_timeout_seconds", 150)))
             reverse_seconds = max(1, int(self.config.get("race_reverse_seconds", 3)))
-            restart_drive_confirm_deadline = 0.0
+            restart_drive_confirm_deadline = time.time() + 15.0
             restart_drive_confirm_retry_used = False
             restart_drive_last_confirm_check = 0.0
+            restart_drive_confirm_last_wait_log = 0.0
+            self.log(f"跑图 {self.race_counter + 1}/{target_count}: 已按住 W，开始后台检测 anna 确认可驾驶状态。")
 
             while self.is_running:
                 if self.should_abort_for_process_loss({"phase": "race_drive", "race_index": self.race_counter + 1}):
@@ -4689,6 +4691,7 @@ class FH_UltimateBot(ctk.CTk):
                     if self.find_image("anna.png", region=self.regions["左下"], threshold=0.55, fast_mode=True):
                         self.log(f"跑图 {self.race_counter + 1}/{target_count}: 检测到 anna，确认已进入可驾驶阶段。")
                         restart_drive_confirm_deadline = 0.0
+                        restart_drive_confirm_last_wait_log = 0.0
                     elif now >= restart_drive_confirm_deadline:
                         self.log(f"跑图 {self.race_counter + 1}/{target_count}: anna 后台确认窗口内未检测到，检查是否仍停留在开始赛事界面。")
                         pos_still_start = self.wait_for_any_image(
@@ -4701,7 +4704,7 @@ class FH_UltimateBot(ctk.CTk):
                         )
                         if pos_still_start:
                             if restart_drive_confirm_retry_used:
-                                self.log(f"跑图 {self.race_counter + 1}/{target_count}: 重开后仍卡在开始赛事界面。")
+                                self.log(f"跑图 {self.race_counter + 1}/{target_count}: 开始确认后仍卡在开始赛事界面。")
                                 self.capture_failure_snapshot(
                                     "skill_race_restart_start_button_stuck",
                                     module_name="race",
@@ -4716,23 +4719,29 @@ class FH_UltimateBot(ctk.CTk):
                                     {
                                         "race_index": self.race_counter + 1,
                                         "target_count": target_count,
-                                        "message": "重开后补按 Enter 仍停留在开始赛事界面",
+                                        "message": "补按 Enter 后仍停留在开始赛事界面",
                                     },
                                 )
                                 break
 
-                            self.log(f"跑图 {self.race_counter + 1}/{target_count}: 重开后仍在开始赛事界面，补按 Enter 一次。")
+                            self.log(f"跑图 {self.race_counter + 1}/{target_count}: 仍在开始赛事界面，补按 Enter 一次。")
                             self.hw_press("enter")
                             self.hw_key_down("w")
                             restart_drive_confirm_retry_used = True
                             restart_drive_confirm_deadline = time.time() + 15.0
                             restart_drive_last_confirm_check = 0.0
+                            restart_drive_confirm_last_wait_log = 0.0
                             self.log(f"跑图 {self.race_counter + 1}/{target_count}: 已继续按住 W，延长 anna 后台确认窗口 15 秒。")
                         else:
                             self.log(
-                                f"跑图 {self.race_counter + 1}/{target_count}: 重开后未检测到 anna，但开始按钮已消失，继续跑图。"
+                                f"跑图 {self.race_counter + 1}/{target_count}: 未检测到 anna，但开始按钮已消失，继续跑图。"
                             )
                             restart_drive_confirm_deadline = 0.0
+                            restart_drive_confirm_last_wait_log = 0.0
+                    elif now - restart_drive_confirm_last_wait_log >= 5.0:
+                        remaining = max(0, int(restart_drive_confirm_deadline - now))
+                        self.log(f"跑图 {self.race_counter + 1}/{target_count}: anna 暂未检测到，继续后台确认（剩余约 {remaining} 秒）。")
+                        restart_drive_confirm_last_wait_log = now
 
                 if time.time() - last_chk >= 1.0:
                     if self.find_image("restart.png", region=self.regions["下"], threshold=0.75, fast_mode=True):
@@ -4750,6 +4759,7 @@ class FH_UltimateBot(ctk.CTk):
                         restart_drive_confirm_deadline = time.time() + 15.0
                         restart_drive_confirm_retry_used = False
                         restart_drive_last_confirm_check = 0.0
+                        restart_drive_confirm_last_wait_log = 0.0
                         self.log(f"跑图 {self.race_counter + 1}/{target_count}: 已按住 W，开始后台检测 anna 确认可驾驶状态。")
                         continue
 
