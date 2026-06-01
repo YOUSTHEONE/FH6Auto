@@ -59,7 +59,7 @@ CACHE_DIR = os.path.join(APP_DIR, "cache")
 TEMPLATE_CACHE_FILE = os.path.join(CACHE_DIR, "template_cache.pkl")
 TEMPLATE_META_FILE = os.path.join(CACHE_DIR, "template_meta.json")
 DIAGNOSTICS_DIR = os.path.join(APP_DIR, "diagnostics")
-CURRENT_VERSION = "1.1.5"
+CURRENT_VERSION = "1.1.7"
 APP_DISPLAY_NAME = "FH6Auto by YSTO | 深度优化 SArB1e"
 ORIGINAL_AUTHOR_NAME = "原作者 YSTO"
 OPTIMIZER_NAME = "深度优化者 SArB1e"
@@ -2385,11 +2385,28 @@ class FH_UltimateBot(ctk.CTk):
             fast_mode=True,
         )
         self.hw_press("enter")
-        time.sleep(6.0)
         self.log(f"跑图 {race_index}/{target_count}: 已发送重新开始赛事确认。")
-        # 赛事重开后回到"开始竞赛赛事"界面，按钮已高亮，按 Enter 实际开始比赛
-        self.hw_press("enter")
-        time.sleep(1.5)
+
+        pos_start = self.wait_for_any_image(
+            ["start.png", "startw.png"],
+            region=self.regions["左下"],
+            threshold=0.75,
+            timeout=30,
+            interval=0.4,
+            fast_mode=True,
+        )
+        if not pos_start:
+            self.log(f"跑图 {race_index}/{target_count}: 重开后未找到开始赛事按钮。")
+            self.capture_failure_snapshot(
+                "skill_race_restart_start_button_not_found",
+                module_name="race",
+                details={"race_index": race_index, "target_count": target_count},
+            )
+            return False
+
+        self.game_click(pos_start)
+        self.log(f"跑图 {race_index}/{target_count}: 已点击开始赛事按钮，准备继续给油。")
+        time.sleep(0.5)
         return True
 
     def is_auto_restart_enabled(self):
@@ -3881,14 +3898,22 @@ class FH_UltimateBot(ctk.CTk):
 
         warning = (
             "启动前请先确认：\n\n"
-            "1. 建议车库里除了22b以外的斯巴鲁品牌车辆换成白色等与原厂差异大的涂装，用来提高刷图车辆模板识别稳定性。\n"
-            "2. 跑图用车辆调教已经提前点赞。\n"
-            "3. 跑图蓝图已经提前点赞。\n\n"
-            "4. 建议把用于刷技术点的 22B 技能树提前点满，可明显提高获取效率，最快一张图约 9-10 技能点。\n"
-            "5. 游戏难度已改为【所向披靡】，避免出现“赢得太轻松，建议更换难度”的提示卡住流程。\n"
-            "6. 转向已改为【自动转向】。\n"
-            "7. 换挡已改为【自动挡】。\n\n"
-            "8. 建议首次进入【设计与喷漆】时，将默认提示勾选【不再显示此消息】，可提高脚本稳定性和执行效率。\n\n"
+            "1. 请把桌面分辨率调节为 2K 使用。\n"
+            "2. 跑图车辆请使用默认涂装，不要更换涂装。\n"
+            "3. 跑图用车辆调教已经提前点赞。\n"
+            "4. 跑图蓝图已经提前点赞。\n"
+            "5. 作者测试使用 B站【地平线6 25秒10技术点2.0】视频中的蓝图和车辆调教。\n"
+            "   视频: https://www.bilibili.com/video/BV13vGv6JEqw/?share_source=copy_web&vd_source=fd5ff2dddef9d74dc41f3ea17bd9d996\n"
+            "   车辆共享代码: 772778773；地图共享代码: 705399298。\n\n"
+            "6. 建议车库里除了22b以外的斯巴鲁品牌车辆换成白色等与原厂差异大的涂装，用来提高刷图车辆模板识别稳定性。\n"
+            "   但跑图车辆本身请保持默认涂装。\n\n"
+            "7. 建议把用于刷技术点的 22B 技能树提前点满，可明显提高获取效率，最快一张图约 9-10 技能点。\n"
+            "8. 游戏难度已改为【所向披靡】，避免出现“赢得太轻松，建议更换难度”的提示卡住流程。\n"
+            "9. 转向已改为【自动转向】。\n"
+            "10. 换挡已改为【自动挡】。\n\n"
+            "11. 建议首次进入【设计与喷漆】时，将默认提示勾选【不再显示此消息】，可提高脚本稳定性和执行效率。\n\n"
+            "【旧版兼容提醒】\n"
+            "如果你继续使用旧模板/旧蓝图，请自行确认车辆、调教、蓝图与当前模板匹配。\n\n"
             "【移除车辆重要提醒】\n"
             "删除逻辑会筛选并批量移除【重复项 + B级 + 全轮驱动 + 传奇】车辆，大概率是 22B。\n"
             "启动前必须人工审核筛选结果；如果有其他车辆混入，请先改装至非 B 级或不要启动删车。\n\n"
@@ -4648,6 +4673,9 @@ class FH_UltimateBot(ctk.CTk):
             stall_timeout = max(1, int(self.config.get("race_stall_timeout_seconds", 60)))
             restart_timeout = max(stall_timeout, int(self.config.get("race_restart_timeout_seconds", 150)))
             reverse_seconds = max(1, int(self.config.get("race_reverse_seconds", 3)))
+            restart_drive_confirm_deadline = 0.0
+            restart_drive_confirm_retry_used = False
+            restart_drive_last_confirm_check = 0.0
 
             while self.is_running:
                 if self.should_abort_for_process_loss({"phase": "race_drive", "race_index": self.race_counter + 1}):
@@ -4655,6 +4683,56 @@ class FH_UltimateBot(ctk.CTk):
 
                 now = time.time()
                 elap = now - race_start_time
+
+                if restart_drive_confirm_deadline and now - restart_drive_last_confirm_check >= 1.0:
+                    restart_drive_last_confirm_check = now
+                    if self.find_image("anna.png", region=self.regions["左下"], threshold=0.55, fast_mode=True):
+                        self.log(f"跑图 {self.race_counter + 1}/{target_count}: 检测到 anna，确认已进入可驾驶阶段。")
+                        restart_drive_confirm_deadline = 0.0
+                    elif now >= restart_drive_confirm_deadline:
+                        self.log(f"跑图 {self.race_counter + 1}/{target_count}: anna 后台确认窗口内未检测到，检查是否仍停留在开始赛事界面。")
+                        pos_still_start = self.wait_for_any_image(
+                            ["start.png", "startw.png"],
+                            region=self.regions["左下"],
+                            threshold=0.75,
+                            timeout=0.8,
+                            interval=0.2,
+                            fast_mode=True,
+                        )
+                        if pos_still_start:
+                            if restart_drive_confirm_retry_used:
+                                self.log(f"跑图 {self.race_counter + 1}/{target_count}: 重开后仍卡在开始赛事界面。")
+                                self.capture_failure_snapshot(
+                                    "skill_race_restart_start_button_stuck",
+                                    module_name="race",
+                                    details={
+                                        "race_index": self.race_counter + 1,
+                                        "target_count": target_count,
+                                        "confirm_window_seconds": 15,
+                                    },
+                                )
+                                self.set_failure_context(
+                                    "skill_race_restart_start_button_stuck",
+                                    {
+                                        "race_index": self.race_counter + 1,
+                                        "target_count": target_count,
+                                        "message": "重开后补按 Enter 仍停留在开始赛事界面",
+                                    },
+                                )
+                                break
+
+                            self.log(f"跑图 {self.race_counter + 1}/{target_count}: 重开后仍在开始赛事界面，补按 Enter 一次。")
+                            self.hw_press("enter")
+                            self.hw_key_down("w")
+                            restart_drive_confirm_retry_used = True
+                            restart_drive_confirm_deadline = time.time() + 15.0
+                            restart_drive_last_confirm_check = 0.0
+                            self.log(f"跑图 {self.race_counter + 1}/{target_count}: 已继续按住 W，延长 anna 后台确认窗口 15 秒。")
+                        else:
+                            self.log(
+                                f"跑图 {self.race_counter + 1}/{target_count}: 重开后未检测到 anna，但开始按钮已消失，继续跑图。"
+                            )
+                            restart_drive_confirm_deadline = 0.0
 
                 if time.time() - last_chk >= 1.0:
                     if self.find_image("restart.png", region=self.regions["下"], threshold=0.75, fast_mode=True):
@@ -4669,6 +4747,10 @@ class FH_UltimateBot(ctk.CTk):
                         last_chk = race_start_time
                         stall_recovery_count = 0
                         self.hw_key_down("w")
+                        restart_drive_confirm_deadline = time.time() + 15.0
+                        restart_drive_confirm_retry_used = False
+                        restart_drive_last_confirm_check = 0.0
+                        self.log(f"跑图 {self.race_counter + 1}/{target_count}: 已按住 W，开始后台检测 anna 确认可驾驶状态。")
                         continue
 
                     self.set_failure_context(
