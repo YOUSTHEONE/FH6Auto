@@ -59,7 +59,7 @@ CACHE_DIR = os.path.join(APP_DIR, "cache")
 TEMPLATE_CACHE_FILE = os.path.join(CACHE_DIR, "template_cache.pkl")
 TEMPLATE_META_FILE = os.path.join(CACHE_DIR, "template_meta.json")
 DIAGNOSTICS_DIR = os.path.join(APP_DIR, "diagnostics")
-CURRENT_VERSION = "1.1.8"
+CURRENT_VERSION = "1.1.9"
 APP_DISPLAY_NAME = "FH6Auto by YSTO | 深度优化 SArB1e"
 ORIGINAL_AUTHOR_NAME = "原作者 YSTO"
 OPTIMIZER_NAME = "深度优化者 SArB1e"
@@ -2825,11 +2825,17 @@ class FH_UltimateBot(ctk.CTk):
                 self.log_recovery(f"检测到大世界锚点 {anchor_name}，按 ESC 尝试进入菜单。")
                 world_anchor_logged = True
 
+            if self.find_image("ExitRaceConfirm.png", region=self.regions["全界面"], threshold=0.70, fast_mode=True):
+                self.log_recovery("检测到退出赛事确认弹窗，按 Enter 确认退出。")
+                self.hw_press("enter")
+                time.sleep(3.0)
+                continue
+
             pos_exit = self.find_any_image(["exit.png", "exit-b.png"], region=self.regions["左下"], threshold=0.85)
             if pos_exit:
                 # 检测是否处于赛事上下文，避免在主菜单等非赛事场景误点退出导致退出游戏
                 in_race_context = self.find_any_image(
-                    ["RestartRace.png", "start.png", "startw.png", "restart.png"],
+                    ["RestartRace.png", "start.png", "startw.png", "restart.png", "ExitRaceConfirm.png"],
                     region=self.regions["全界面"],
                     threshold=0.55,
                     fast_mode=True,
@@ -4732,12 +4738,45 @@ class FH_UltimateBot(ctk.CTk):
                             restart_drive_last_confirm_check = 0.0
                             restart_drive_confirm_last_wait_log = 0.0
                             self.log(f"跑图 {self.race_counter + 1}/{target_count}: 已继续按住 W，延长 anna 后台确认窗口 15 秒。")
+                        elif self.find_image("ExitRaceConfirm.png", region=self.regions["全界面"], threshold=0.70, fast_mode=True):
+                            self.log(f"跑图 {self.race_counter + 1}/{target_count}: 未检测到 anna，命中退出赛事确认弹窗，按 Enter 退出并交给恢复流程。")
+                            self.hw_press("enter")
+                            time.sleep(3.0)
+                            self.set_failure_context(
+                                "race_exit_confirm_prompt_after_start",
+                                {
+                                    "race_index": self.race_counter + 1,
+                                    "target_count": target_count,
+                                    "message": "开始跑图后未检测到 anna，卡在退出赛事确认弹窗，已确认退出",
+                                },
+                            )
+                            break
+                        elif self.find_image("restart.png", region=self.regions["下"], threshold=0.75, fast_mode=True):
+                            self.log(f"跑图 {self.race_counter + 1}/{target_count}: 未检测到 anna，但已检测到完赛按钮，按完赛处理。")
+                            finished = True
+                            break
                         else:
                             self.log(
-                                f"跑图 {self.race_counter + 1}/{target_count}: 未检测到 anna，但开始按钮已消失，继续跑图。"
+                                f"跑图 {self.race_counter + 1}/{target_count}: 未检测到 anna，且未命中开始按钮/退出赛事弹窗/完赛按钮，保存现场并进入恢复。"
                             )
-                            restart_drive_confirm_deadline = 0.0
-                            restart_drive_confirm_last_wait_log = 0.0
+                            self.capture_failure_snapshot(
+                                "race_drive_state_not_confirmed",
+                                module_name="race",
+                                details={
+                                    "race_index": self.race_counter + 1,
+                                    "target_count": target_count,
+                                    "message": "开始跑图后未检测到 anna，且无法确认当前赛事状态",
+                                },
+                            )
+                            self.set_failure_context(
+                                "race_drive_state_not_confirmed",
+                                {
+                                    "race_index": self.race_counter + 1,
+                                    "target_count": target_count,
+                                    "message": "开始跑图后未检测到 anna，且未命中已知兜底状态",
+                                },
+                            )
+                            break
                     elif now - restart_drive_confirm_last_wait_log >= 5.0:
                         remaining = max(0, int(restart_drive_confirm_deadline - now))
                         self.log(f"跑图 {self.race_counter + 1}/{target_count}: anna 暂未检测到，继续后台确认（剩余约 {remaining} 秒）。")
