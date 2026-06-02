@@ -59,7 +59,7 @@ CACHE_DIR = os.path.join(APP_DIR, "cache")
 TEMPLATE_CACHE_FILE = os.path.join(CACHE_DIR, "template_cache.pkl")
 TEMPLATE_META_FILE = os.path.join(CACHE_DIR, "template_meta.json")
 DIAGNOSTICS_DIR = os.path.join(APP_DIR, "diagnostics")
-CURRENT_VERSION = "1.1.10"
+CURRENT_VERSION = "1.2.0"
 APP_DISPLAY_NAME = "FH6Auto by YSTO | 深度优化 SArB1e"
 ORIGINAL_AUTHOR_NAME = "原作者 YSTO"
 OPTIMIZER_NAME = "深度优化者 SArB1e"
@@ -306,6 +306,28 @@ class FH_UltimateBot(ctk.CTk):
         self.file_template_cache = {}
         self.last_positions = {}
         self.support_win = None
+        self.template_debug_win = None
+        self.template_debug_rows = {}
+        self.template_debug_issue_text = None
+        self.template_debug_search_var = None
+        self.template_debug_filter_var = None
+        self.template_debug_category_var = None
+        self.template_debug_images = []
+        self.template_debug_syncing = False
+        self.template_debug_all_items = []
+        self.template_debug_filtered_items = []
+        self.template_debug_pending_thresholds = {}
+        self.template_debug_page = 0
+        self.template_debug_page_size = 35
+        self.template_debug_page_label = None
+        self.template_debug_prev_btn = None
+        self.template_debug_next_btn = None
+        self.template_match_records = []
+        self.template_match_records_lock = threading.Lock()
+        self.template_match_issue_map = {}
+        self.template_match_last_log_at = {}
+        self.template_file_list_cache = None
+        self.template_group_members_cache = None
         self.edge_template_cache = {}
         self.scaled_edge_template_cache = {}
         self.current_step_name = ""
@@ -322,6 +344,9 @@ class FH_UltimateBot(ctk.CTk):
         self.process_lost_event = threading.Event()
         self.recovery_in_progress = threading.Event()
         self.app_closing = threading.Event()
+        self.sell_tail_position_ready = False
+        self.sell_fresh_skip_count = 0
+        self.sell_stop_no_deletable = False
 
         self.init_regions()
 
@@ -363,6 +388,10 @@ class FH_UltimateBot(ctk.CTk):
             "cr_car_type": "wuling",
             "cr_settlement_enabled": True,
             "cr_settlement_laps": 5,
+            "cr_shortfall_fallback_enabled": True,
+            "cr_shortfall_car_type": "wuling",
+            "cr_shortfall_settlement_laps": 5,
+            "cr_shortfall_car_cost": 85000,
             "cr_wuling_lap_seconds": 340,
             "cr_toyota_lap_seconds": 380,
             "cr_step_retry_count": 3,
@@ -383,8 +412,12 @@ class FH_UltimateBot(ctk.CTk):
             "like_guard_stall_seconds": 180,
             "like_guard_max_prompt_passes": 3,
             "skip_startup_prompts": False,
+            "template_thresholds": {},
+            "template_match_debug_enabled": True,
         }
         self.load_config()
+        if not isinstance(self.config.get("template_thresholds"), dict):
+            self.config["template_thresholds"] = {}
 
         self.setup_ui()
         self.start_hotkey_listener()
@@ -570,6 +603,8 @@ class FH_UltimateBot(ctk.CTk):
             self.config["like_guard_enabled"] = bool(self.var_like_guard_enabled.get())
         if hasattr(self, "var_skip_startup_prompts"):
             self.config["skip_startup_prompts"] = bool(self.var_skip_startup_prompts.get())
+        if hasattr(self, "var_template_match_debug_enabled"):
+            self.config["template_match_debug_enabled"] = bool(self.var_template_match_debug_enabled.get())
         if hasattr(self, "entry_like_guard_stall_seconds"):
             self.config["like_guard_stall_seconds"] = self.get_positive_entry_value(
                 self.entry_like_guard_stall_seconds,
@@ -593,6 +628,26 @@ class FH_UltimateBot(ctk.CTk):
                 self.entry_cr_step_retry_count,
                 self.config.get("cr_step_retry_count", 3),
             )
+        if hasattr(self, "var_cr_shortfall_fallback_enabled") and self.var_cr_shortfall_fallback_enabled is not None:
+            try:
+                self.config["cr_shortfall_fallback_enabled"] = bool(self.var_cr_shortfall_fallback_enabled.get())
+            except Exception:
+                pass
+        if hasattr(self, "option_cr_shortfall_car_type") and self.option_cr_shortfall_car_type is not None:
+            try:
+                self.config["cr_shortfall_car_type"] = (
+                    "toyota" if self.option_cr_shortfall_car_type.get() == "丰田" else "wuling"
+                )
+            except Exception:
+                pass
+        if hasattr(self, "entry_cr_shortfall_settlement_laps") and self.entry_cr_shortfall_settlement_laps is not None:
+            try:
+                self.config["cr_shortfall_settlement_laps"] = self.get_positive_entry_value(
+                    self.entry_cr_shortfall_settlement_laps,
+                    self.config.get("cr_shortfall_settlement_laps", self.config.get("cr_settlement_laps", 5)),
+                )
+            except Exception:
+                pass
         self.config.pop("race_car_template", None)
         self.config.pop("race_car_fallback_enabled", None)
         try:
@@ -618,6 +673,479 @@ class FH_UltimateBot(ctk.CTk):
                 json.dump(self.config, f, indent=4, ensure_ascii=False)
         except Exception:
             pass
+
+    def open_cr_shortfall_settings_window(self):
+        win = ctk.CTkToplevel(self)
+        win.title("CR不足兜底设置")
+        win.geometry("460x360")
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+
+        frame = ctk.CTkFrame(win, corner_radius=10)
+        frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        ctk.CTkLabel(
+            frame,
+            text="CR不足兜底",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color="#F5B041",
+        ).pack(pady=(14, 8))
+        ctk.CTkLabel(
+            frame,
+            text="买 22B 前检测当前 CR；不足时自动刷 CR 到足够完成本轮买车循环。",
+            wraplength=390,
+            justify="center",
+            text_color="#D0D0D0",
+        ).pack(pady=(0, 12))
+
+        var_enabled = ctk.BooleanVar(
+            value=bool(self.config.get("cr_shortfall_fallback_enabled", True))
+        )
+        ctk.CTkCheckBox(
+            frame,
+            text="启用 CR 不足自动兜底",
+            variable=var_enabled,
+        ).pack(anchor="w", padx=38, pady=(4, 12))
+
+        row_car = ctk.CTkFrame(frame, fg_color="transparent")
+        row_car.pack(fill="x", padx=38, pady=6)
+        ctk.CTkLabel(row_car, text="刷 CR 车辆:", width=110, anchor="w").pack(side="left")
+        option_car = ctk.CTkOptionMenu(row_car, width=120, values=["五菱", "丰田"])
+        option_car.set(
+            "丰田" if self.config.get("cr_shortfall_car_type", self.config.get("cr_car_type", "wuling")) == "toyota" else "五菱"
+        )
+        option_car.pack(side="left")
+
+        row_laps = ctk.CTkFrame(frame, fg_color="transparent")
+        row_laps.pack(fill="x", padx=38, pady=6)
+        ctk.CTkLabel(row_laps, text="几圈结算一次:", width=110, anchor="w").pack(side="left")
+        entry_laps = ctk.CTkEntry(row_laps, width=80, justify="center")
+        entry_laps.insert(
+            0,
+            str(self.config.get("cr_shortfall_settlement_laps", self.config.get("cr_settlement_laps", 5))),
+        )
+        entry_laps.pack(side="left")
+
+        summary = ctk.CTkLabel(
+            frame,
+            text=f"计算规则：剩余买车数 × {self.get_cr_shortfall_car_cost():,} CR",
+            text_color="#A0A0A0",
+            wraplength=390,
+        )
+        summary.pack(pady=(14, 8))
+
+        def save_shortfall_settings():
+            self.config["cr_shortfall_fallback_enabled"] = bool(var_enabled.get())
+            self.config["cr_shortfall_car_type"] = (
+                "toyota" if option_car.get() == "丰田" else "wuling"
+            )
+            self.config["cr_shortfall_settlement_laps"] = self.get_positive_entry_value(
+                entry_laps,
+                self.config.get("cr_shortfall_settlement_laps", self.config.get("cr_settlement_laps", 5)),
+            )
+            self.save_runtime_config()
+            self.log(
+                "CR不足兜底设置已保存："
+                f"{'启用' if self.config['cr_shortfall_fallback_enabled'] else '关闭'}，"
+                f"车辆 {'丰田' if self.config['cr_shortfall_car_type'] == 'toyota' else '五菱'}，"
+                f"{self.config['cr_shortfall_settlement_laps']} 圈结算。"
+            )
+            win.destroy()
+
+        ctk.CTkButton(
+            frame,
+            text="保存",
+            width=130,
+            height=34,
+            fg_color="#2EA043",
+            hover_color="#238636",
+            command=save_shortfall_settings,
+        ).pack(pady=(10, 4))
+
+    def get_template_key(self, template_path):
+        return os.path.basename(str(template_path or "")).replace("\\", "/")
+
+    def clamp_template_threshold(self, value, default_value=0.75):
+        try:
+            value = float(value)
+        except Exception:
+            value = float(default_value)
+        return max(0.30, min(0.95, value))
+
+    def get_template_threshold(self, template_path, default_threshold):
+        thresholds = self.config.get("template_thresholds")
+        if not isinstance(thresholds, dict):
+            thresholds = {}
+            self.config["template_thresholds"] = thresholds
+
+        key = self.get_template_key(template_path)
+        if key in thresholds:
+            return self.clamp_template_threshold(thresholds.get(key), default_threshold)
+        return float(default_threshold)
+
+    def set_template_threshold(self, template_path, threshold):
+        key = self.get_template_key(template_path)
+        if not key:
+            return
+        thresholds = self.config.setdefault("template_thresholds", {})
+        thresholds[key] = round(self.clamp_template_threshold(threshold), 2)
+
+    def reset_template_threshold(self, template_path):
+        thresholds = self.config.setdefault("template_thresholds", {})
+        thresholds.pop(self.get_template_key(template_path), None)
+
+    def is_template_match_debug_enabled(self):
+        var_widget = self.__dict__.get("var_template_match_debug_enabled")
+        if var_widget is not None:
+            try:
+                return bool(var_widget.get())
+            except Exception:
+                pass
+        return bool(self.config.get("template_match_debug_enabled", True))
+
+    def get_images_root_dir(self):
+        external_dir = os.path.join(APP_DIR, "images")
+        if os.path.isdir(external_dir):
+            return external_dir
+        internal_dir = os.path.join(INTERNAL_DIR, "images")
+        if os.path.isdir(internal_dir):
+            return internal_dir
+        return None
+
+    def list_template_files(self):
+        if self.template_file_list_cache is not None:
+            return list(self.template_file_list_cache)
+
+        images_dir = self.get_images_root_dir()
+        if not images_dir:
+            return []
+
+        valid_exts = {".png", ".jpg", ".jpeg", ".bmp"}
+        templates = []
+        try:
+            for root, _, files in os.walk(images_dir):
+                for file_name in files:
+                    ext = os.path.splitext(file_name)[1].lower()
+                    if ext not in valid_exts:
+                        continue
+                    full_path = os.path.join(root, file_name)
+                    rel_path = os.path.relpath(full_path, images_dir).replace("\\", "/")
+                    templates.append({
+                        "name": file_name,
+                        "rel_path": rel_path,
+                        "full_path": full_path,
+                    })
+        except Exception:
+            return []
+        templates.sort(key=lambda item: item["rel_path"].lower())
+        self.template_file_list_cache = list(templates)
+        self.template_group_members_cache = None
+        return templates
+
+    def get_template_metadata_overrides(self):
+        return {
+            "designandpaint_w.png": ("CJ", "cj_design_paint", "白底入口", "CJ 超级抽奖：车辆页入口-设计与喷漆，白底状态"),
+            "designandpaint-b.png": ("CJ", "cj_design_paint", "黑底入口", "CJ 超级抽奖：车辆页入口-设计与喷漆，黑底/选中状态"),
+            "choosecar.png": ("CJ", "cj_choose_car", "白底入口", "CJ 超级抽奖：设计与喷漆内的选择车辆入口，白底状态"),
+            "choosecar-b.png": ("CJ", "cj_choose_car", "黑底入口", "CJ 超级抽奖：设计与喷漆内的选择车辆入口，黑底/选中状态"),
+            "UandT-w.png": ("CJ", "cj_upgrade_tuning", "白底入口", "CJ 超级抽奖：升级与调教入口，白底状态"),
+            "UandT-b.png": ("CJ", "cj_upgrade_tuning", "黑底入口", "CJ 超级抽奖：升级与调教入口，黑底/选中状态"),
+            "clsldcnw.png": ("CJ", "cj_skill_tree", "白底入口", "CJ 超级抽奖：车辆熟练度/技能树入口，白底状态"),
+            "clsldcnb.png": ("CJ", "cj_skill_tree", "黑底入口", "CJ 超级抽奖：车辆熟练度/技能树入口，黑底/选中状态"),
+            "FreshTagText.png": ("删车/CJ", "fresh_car_tag", "全新文字", "删车保护/CJ 选车：车辆卡片上的全新标签文字，检测到则禁止删车"),
+            "newcartag.png": ("CJ", "fresh_car_tag", "全新图标", "CJ 选车：车辆卡片上的全新标签图标，用于定位待抽奖车辆"),
+            "SPNE.png": ("CJ", "cj_skill_state", "技能点不足", "CJ 超级抽奖：技能点不足或技能已点完提示"),
+            "EXPwU.png": ("CJ", "cj_skill_state", "经验技能", "CJ 超级抽奖：经验技能已升级/可用状态"),
+            "DSI.png": ("CJ", "cj_prompt", "不再显示", "设计与喷漆首次提示：不再显示该消息"),
+            "buyandsell-w.png": ("车辆菜单", "buy_and_sell", "白底入口", "车辆菜单：购买与出售入口，白底状态"),
+            "buyandsell-b.png": ("车辆菜单", "buy_and_sell", "黑底入口", "车辆菜单：购买与出售入口，黑底/选中状态"),
+            "BNandUC.png": ("车辆菜单", "festival_buy_used", "入口", "嘉年华车辆与收藏：购买新车与二手车入口"),
+            "RemoveFromGarageWhite.png": ("删车", "remove_from_garage", "白底选项", "删车：操作菜单中的从车库移除车辆选项，白底状态"),
+            "RemoveFromGarageBlack.png": ("删车", "remove_from_garage", "黑底选项", "删车：操作菜单中的从车库移除车辆选项，黑底/选中状态"),
+            "rc.png": ("车辆菜单", "car_action_menu", "操作菜单", "车辆操作菜单：上车/移除等操作弹窗锚点"),
+            "collectionjournal.png": ("买车", "buy_collection_journal", "入口", "批量买车：嘉年华播放列表内的车辆收集簿入口"),
+            "masterexplorer.png": ("买车", "buy_master_explorer", "入口", "批量买车：车辆收集簿内探索分类入口"),
+            "carcollection.png": ("买车", "buy_car_collection", "入口", "批量买车：车辆收集页面入口"),
+            "CCbrand.png": ("买车", "subaru_brand", "品牌筛选", "批量买车/CJ：斯巴鲁品牌筛选项"),
+            "consumablecar.png": ("买车", "subaru_22b_buy", "目标车辆", "批量买车：目标消耗品车辆 Subaru 22B"),
+            "Subaru22BScore0706.png": ("车辆/品牌", "subaru_22b", "车辆卡片", "车辆识别：Subaru 22B 分数/卡片特征"),
+            "SubaruBrandFocused.png": ("车辆/品牌", "subaru_brand_state", "聚焦", "品牌筛选：Subaru 品牌聚焦状态"),
+            "SubaruBrandUnfocused.png": ("车辆/品牌", "subaru_brand_state", "未聚焦", "品牌筛选：Subaru 品牌未聚焦状态"),
+            "skillcar.png": ("赛事", "race_skill_car_like", "S2车辆主模板", "刷图/CJ：S2 900 技能车主模板，需要与 liketag 组合确认"),
+            "SkillCarS1790.png": ("赛事", "race_skill_car_like", "S1车辆主模板", "刷图/CJ：S1 790 技能车主模板，需要与 liketag 组合确认"),
+            "liketag.png": ("赛事", "race_skill_car_like", "车辆标签", "刷图/CJ：车辆卡片点赞/收藏标签，用于组合验证技能车"),
+            "LikeW2.png": ("赛后评分", "post_race_like", "白底点赞", "赛后评分：点赞按钮白底状态"),
+            "LikeB2.png": ("赛后评分", "post_race_like", "黑底点赞", "赛后评分：点赞按钮黑底/选中状态"),
+            "CancelW2.png": ("赛后评分", "post_race_cancel", "白底取消", "赛后评分：取消按钮白底状态"),
+            "CancelB2.png": ("赛后评分", "post_race_cancel", "黑底取消", "赛后评分：取消按钮黑底/选中状态"),
+            "DislikeW2.png": ("赛后评分", "post_race_dislike", "点踩", "赛后评分：点踩按钮白底状态"),
+            "CRPoint.png": ("CR", "cr_read_anchor", "大号CR锚点", "CR 检测：CR 点数字前的大号 CR 锚点"),
+            "CRPointSmall.png": ("CR", "cr_read_anchor", "小号CR锚点", "CR 检测：CR 点数字前的小号 CR 锚点"),
+            "ServerError.png": ("错误处理", "server_error", "服务器错误", "刷图/刷CR：服务器错误提示"),
+            "ServerErrorCantUpdateFormidableAdversaryData.png": ("错误处理", "server_error", "劲敌数据错误", "刷CR：无法更新劲敌数据提示"),
+            "ServerErrorSolved.png": ("错误处理", "server_error", "错误已处理", "服务器错误恢复/关闭后的确认状态"),
+            "ControllerDisconnect.png": ("错误处理", "controller_disconnect", "手柄断连", "全局守护：控制器断开提示"),
+            "NoAvailableCars.png": ("CJ", "cj_no_available_car", "无可用车", "CJ/选车：没有可用车辆提示"),
+            "NoBlack.png": ("按钮", "yes_no", "否黑底", "确认弹窗：否/取消黑底状态"),
+            "NoWhite.png": ("按钮", "yes_no", "否白底", "确认弹窗：否/取消白底状态"),
+            "YesBlack.png": ("按钮", "yes_no", "是黑底", "确认弹窗：是/确认黑底状态"),
+            "YesWhite.png": ("按钮", "yes_no", "是白底", "确认弹窗：是/确认白底状态"),
+        }
+
+    def infer_template_group_id(self, template_name, fallback):
+        name = self.get_template_key(template_name)
+        stem = os.path.splitext(name)[0]
+        normalized = stem
+        for suffix in ("Black", "White", "-b", "-w", "_w"):
+            normalized = normalized.replace(suffix, "")
+        normalized = normalized.replace("FullChecked", "").replace("FullUnchecked", "")
+        normalized = normalized.replace("Checked", "").replace("Unchecked", "")
+        return normalized.lower() or fallback
+
+    def infer_template_metadata(self, template_name):
+        name = self.get_template_key(template_name)
+        lower = name.lower()
+        stem = os.path.splitext(name)[0]
+        overrides = self.get_template_metadata_overrides()
+        if name in overrides:
+            category, group_id, role, description = overrides[name]
+            return {"category": category, "group_id": group_id, "role": role, "description": description}
+
+        filter_prefixes = {
+            "Duplicate": ("删车筛选", "filter_duplicate", "重复项筛选"),
+            "ClassB": ("删车筛选", "filter_class_b", "B 级筛选"),
+            "AllWheelDrive": ("删车筛选", "filter_awd", "全轮驱动筛选"),
+            "Legendary": ("删车筛选", "filter_legendary", "传奇稀有度筛选"),
+            "ForzaEdition": ("删车筛选", "filter_forza_edition", "Forza Edition 筛选"),
+            "RearWheelDrive": ("删车筛选", "filter_rwd", "后轮驱动筛选"),
+            "TrackToys": ("删车筛选", "filter_track_toys", "Track Toys 类型筛选"),
+        }
+        for prefix, (category, group_id, label) in filter_prefixes.items():
+            if name.startswith(prefix):
+                color = "黑底" if "Black" in name else "白底"
+                state = "已勾选" if "Checked" in name else "未勾选"
+                full = "整行状态" if "Full" in name else "局部状态"
+                return {
+                    "category": category,
+                    "group_id": group_id,
+                    "role": f"{color}{state}{full}",
+                    "description": f"删车筛选：{label}，{color}/{state}/{full} 模板",
+                }
+
+        brand_names = {
+            "Toyota": "Toyota/丰田",
+            "ToyotaBlack": "Toyota/丰田",
+            "ToyotaWhite": "Toyota/丰田",
+            "ToyotaRaceCar": "丰田刷CR车辆",
+            "ToyotaAE86SpecialMisdetect": "丰田 AE86 误识别排除模板",
+            "Wuling": "Wuling/五菱",
+            "WulingBlack": "Wuling/五菱",
+            "WulingRaceCar": "五菱刷CR车辆",
+            "WulingRaceCar2": "五菱刷CR车辆备用",
+            "Hyundai": "Hyundai/现代",
+            "Chevrolet": "Chevrolet/雪佛兰",
+            "Volvo": "Volvo/沃尔沃",
+        }
+        if stem in brand_names:
+            base = stem.replace("Black", "").replace("White", "").replace("RaceCar2", "RaceCar")
+            role = "黑底状态" if "Black" in stem else "白底状态" if "White" in stem else "车辆/品牌"
+            return {
+                "category": "车辆/品牌",
+                "group_id": f"brand_{base.lower()}",
+                "role": role,
+                "description": f"车辆/品牌识别：{brand_names[stem]}，{role}",
+            }
+
+        if lower.startswith("cr_credits/") or name in [f"{i}.png" for i in range(10)] or stem.isdigit():
+            return {
+                "category": "数字识别",
+                "group_id": "cr_digit_templates",
+                "role": f"数字 {stem}",
+                "description": f"CR 检测：数字识别模板 {stem}",
+            }
+
+        if "formidableadversary" in lower or "race" in lower or name in {
+            "AutoDriveOn.png", "eventlab.png", "eventlabcar.png", "RoadRacing.png",
+            "CreativeCenter.png", "Online.png", "horizon6.png", "start.png", "startw.png",
+            "restart.png", "nextstep.png", "playenent.png", "Enter.png", "exit.png", "exit-b.png",
+            "ExitRaceConfirm.png", "RestartRace.png", "RestartRaceConfirm.png", "RestartRaceConfirmPage.png",
+        }:
+            return {
+                "category": "赛事",
+                "group_id": self.infer_template_group_id(name, "race_flow"),
+                "role": "赛事流程锚点",
+                "description": f"刷图/刷CR赛事流程：{stem} 页面、按钮或状态锚点",
+            }
+
+        if name in {"Filter.png", "FilterPanel.png", "FilterDriveTypeHeader.png", "DriveTypeHeader.png", "RarityHeader.png"}:
+            return {
+                "category": "删车筛选",
+                "group_id": "filter_panel",
+                "role": "筛选面板锚点",
+                "description": f"删车筛选：筛选面板或筛选分类标题 {stem}",
+            }
+
+        if name in {"R998.png", "R998Detail1.png", "D.png", "DFull.png", "VEI.png"}:
+            return {
+                "category": "车辆/品牌",
+                "group_id": "vehicle_stat_labels",
+                "role": "车辆属性/评分",
+                "description": f"车辆识别：车辆评分、等级或属性标识 {stem}",
+            }
+
+        if name in {"anna.png", "link.png", "GoeliaDetail.png", "GoeliaSmall.png", "GapWithFormidableAdversary.png", "LeftFormidableAdversaryMatch.png", "AnnaAndLinkInFormidableAdversaryRace.png"}:
+            return {
+                "category": "赛事",
+                "group_id": "race_hud_anchors",
+                "role": "赛事 HUD 锚点",
+                "description": f"刷图/刷CR：赛事 HUD、路线或劲敌匹配锚点 {stem}",
+            }
+
+        if name in {"continue-b.png", "continue-w.png"}:
+            return {
+                "category": "按钮",
+                "group_id": "continue_button",
+                "role": "继续按钮",
+                "description": f"通用按钮：继续，{'黑底/选中' if '-b' in name else '白底'}状态",
+            }
+
+        if name in {"BarnFindBlack.png", "BarnFindWhite.png"}:
+            return {
+                "category": "车辆/品牌",
+                "group_id": "barn_find_filter",
+                "role": "车房宝物状态",
+                "description": f"车辆筛选：车房宝物，{'黑底' if 'Black' in name else '白底'}状态",
+            }
+
+        if name in {"searcha.png", "searchb.png", "newCC.png", "Residence.png"}:
+            return {
+                "category": "菜单",
+                "group_id": self.infer_template_group_id(name, "menu_misc"),
+                "role": "菜单/搜索锚点",
+                "description": f"菜单流程：搜索、收藏或居住地相关锚点 {stem}",
+            }
+
+        return {
+            "category": "模板",
+            "group_id": self.infer_template_group_id(name, f"template_{stem.lower()}"),
+            "role": "文件名定位",
+            "description": f"模板识别：{stem}，按文件名定位用途；可在运行日志中查看调用阶段",
+        }
+
+    def get_template_metadata(self, template_name):
+        return self.infer_template_metadata(template_name)
+
+    def get_template_description(self, template_name):
+        return self.get_template_metadata(template_name).get("description", f"模板识别：{template_name}")
+
+    def get_template_category(self, template_name):
+        return self.get_template_metadata(template_name).get("category", "模板")
+
+    def get_template_group_id(self, template_name):
+        return self.get_template_metadata(template_name).get("group_id", "")
+
+    def get_template_group_members(self, template_name):
+        if self.template_group_members_cache is None:
+            group_map = {}
+            for item in self.list_template_files():
+                key = self.get_template_key(item["name"])
+                group_id = self.get_template_group_id(item["name"])
+                if group_id:
+                    group_map.setdefault(group_id, []).append(key)
+            self.template_group_members_cache = {
+                group_id: sorted(set(members), key=str.lower)
+                for group_id, members in group_map.items()
+            }
+
+        group_id = self.get_template_group_id(template_name)
+        if not group_id:
+            return [self.get_template_key(template_name)]
+        return self.template_group_members_cache.get(group_id) or [self.get_template_key(template_name)]
+
+    def set_template_group_threshold(self, template_name, threshold):
+        for member in self.get_template_group_members(template_name):
+            self.set_template_threshold(member, threshold)
+
+    def reset_template_group_threshold(self, template_name):
+        thresholds = self.config.setdefault("template_thresholds", {})
+        for member in self.get_template_group_members(template_name):
+            thresholds.pop(member, None)
+
+    def classify_template_match_issue(self, score, threshold, matched):
+        try:
+            score = float(score)
+            threshold = float(threshold)
+        except Exception:
+            return ""
+        if matched:
+            return "命中"
+        if score >= max(0.40, threshold - 0.25):
+            return "疑似阈值过高/模板差异"
+        if score < 0.15:
+            return "基本无匹配，可能页面不对/模板不在当前画面"
+        return "未命中"
+
+    def describe_match_region(self, region):
+        if not region:
+            return "full"
+        try:
+            normalized = tuple(int(v) for v in region)
+            for name, candidate in self.regions.items():
+                if tuple(int(v) for v in candidate) == normalized:
+                    return name
+        except Exception:
+            pass
+        return str(region)
+
+    def record_template_match(self, record):
+        template_name = self.get_template_key(record.get("template"))
+        if not template_name:
+            return
+
+        record = dict(record)
+        record["template"] = template_name
+        record["timestamp"] = time.strftime("%H:%M:%S")
+        record["issue"] = self.classify_template_match_issue(
+            record.get("score", 0.0),
+            record.get("threshold", 0.0),
+            record.get("matched", False),
+        )
+
+        with self.template_match_records_lock:
+            self.template_match_records.append(record)
+            if len(self.template_match_records) > 300:
+                self.template_match_records = self.template_match_records[-300:]
+            if record["issue"] and record["issue"] != "命中":
+                self.template_match_issue_map[template_name] = record
+
+        self.refresh_template_debug_row(record)
+
+        if self.is_template_match_debug_enabled():
+            now = time.time()
+            log_key = f"{template_name}:{record.get('threshold'):.2f}:{record.get('matched')}"
+            should_log = bool(record.get("matched")) or record["issue"] in (
+                "疑似阈值过高/模板差异",
+                "基本无匹配，可能页面不对/模板不在当前画面",
+            )
+            last_log_at = self.template_match_last_log_at.get(log_key, 0)
+            if should_log and now - last_log_at >= 1.0:
+                self.template_match_last_log_at[log_key] = now
+                pos_text = record.get("pos") if record.get("pos") else "-"
+                self.log(
+                    f"[match] {template_name} score={record.get('score', 0.0):.2f}/"
+                    f"{record.get('threshold', 0.0):.2f} scale={record.get('scale', 1.0):.3f} "
+                    f"{'hit' if record.get('matched') else 'miss'} region={record.get('region_label', 'full')} "
+                    f"pos={pos_text} {record['issue']}"
+                )
+
+    def get_recent_template_match_records(self, limit=80):
+        with self.template_match_records_lock:
+            return list(self.template_match_records[-limit:])
+
+    def get_recent_template_match_issues(self, limit=80):
+        with self.template_match_records_lock:
+            issues = [record for record in self.template_match_records if record.get("issue") not in ("", "命中")]
+        return issues[-limit:]
 
     def apply_pipeline_values(self, races_per_loop, actions_per_loop, loops):
         self.entry_race.delete(0, "end")
@@ -1200,6 +1728,16 @@ class FH_UltimateBot(ctk.CTk):
             self.config["buy_count"],
         )
         self.entry_car.bind("<KeyRelease>", self.sync_buy_to_sell)
+        ctk.CTkButton(
+            box_car,
+            text="CR不足兜底",
+            width=120,
+            height=28,
+            corner_radius=8,
+            fg_color="#D97706",
+            hover_color="#B45309",
+            command=self.open_cr_shortfall_settings_window,
+        ).pack(pady=(0, 6))
 
         self.next_frame2, self.entry_next2, self.chk2 = create_next_step(
             self.config_frame, self.var_chk2, self.config.get("next_2", 3)
@@ -1247,6 +1785,16 @@ class FH_UltimateBot(ctk.CTk):
             command=self.start_auto_super_wheelspin,
         )
         self.btn_auto_cj.pack(pady=(0, 5))
+        ctk.CTkButton(
+            left_cj,
+            text="CR不足兜底",
+            width=120,
+            height=28,
+            corner_radius=8,
+            fg_color="#D97706",
+            hover_color="#B45309",
+            command=self.open_cr_shortfall_settings_window,
+        ).pack(pady=(0, 5))
 
         self.entry_cj = ctk.CTkEntry(left_cj, width=95, height=34, justify="center", corner_radius=8)
         self.entry_cj.insert(0, str(self.config["cj_count"]))
@@ -1375,6 +1923,24 @@ class FH_UltimateBot(ctk.CTk):
             hover_color="#424949",
             command=self.open_debug_settings_window,
         ).pack(side="left", padx=(0, 14))
+        ctk.CTkButton(
+            self.global_settings_frame,
+            text="【测试】模板调试",
+            width=82,
+            height=28,
+            fg_color="#2E86C1",
+            hover_color="#2874A6",
+            command=self.open_template_debug_window,
+        ).pack(side="left", padx=(0, 10))
+        self.var_template_match_debug_enabled = ctk.BooleanVar(value=self.config.get("template_match_debug_enabled", True))
+        self.cb_template_match_debug = ctk.CTkCheckBox(
+            self.global_settings_frame,
+            text="模板评分日志",
+            variable=self.var_template_match_debug_enabled,
+            width=105,
+            command=self.save_config,
+        )
+        self.cb_template_match_debug.pack(side="left", padx=(0, 14))
         self.var_filter_strict_click_verify = ctk.BooleanVar(value=self.config.get("filter_strict_click_verify", False))
         self.cb_filter_strict_click_verify = ctk.CTkCheckBox(
             self.global_settings_frame,
@@ -1752,6 +2318,501 @@ class FH_UltimateBot(ctk.CTk):
         )
         self.log_box.pack(side="left", fill="both", expand=True, padx=8)
         self.sync_buy_to_sell()
+
+    def open_template_debug_window(self):
+        if self.template_debug_win is not None and self.template_debug_win.winfo_exists():
+            self.template_debug_win.focus()
+            self.refresh_template_debug_window()
+            return
+
+        self.template_debug_rows = {}
+        self.template_debug_images = []
+        self.template_debug_win = ctk.CTkToplevel(self)
+        self.template_debug_win.title("【测试】模板识别评分调试")
+        self.template_debug_win.geometry("1180x760")
+        self.template_debug_win.minsize(960, 620)
+        self.template_debug_win.attributes("-topmost", True)
+
+        def on_close():
+            self.template_debug_win.destroy()
+            self.template_debug_win = None
+            self.template_debug_rows = {}
+            self.template_debug_issue_text = None
+            self.template_debug_search_var = None
+            self.template_debug_filter_var = None
+            self.template_debug_category_var = None
+            self.template_debug_images = []
+            self.template_debug_all_items = []
+            self.template_debug_filtered_items = []
+            self.template_debug_pending_thresholds = {}
+            self.template_debug_page = 0
+            self.template_debug_page_label = None
+            self.template_debug_prev_btn = None
+            self.template_debug_next_btn = None
+
+        self.template_debug_win.protocol("WM_DELETE_WINDOW", on_close)
+
+        header = ctk.CTkFrame(self.template_debug_win, fg_color="#20242A", height=92, corner_radius=8)
+        header.pack(fill="x", padx=12, pady=(12, 8))
+        header.pack_propagate(False)
+
+        ctk.CTkLabel(
+            header,
+            text="【测试】模板识别评分调试",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color="#5DADE2",
+        ).pack(side="left", padx=(14, 18))
+
+        self.template_debug_search_var = ctk.StringVar(value="")
+        search_entry = ctk.CTkEntry(
+            header,
+            width=210,
+            height=30,
+            textvariable=self.template_debug_search_var,
+            placeholder_text="搜索模板名/用途",
+        )
+        search_entry.pack(side="left", padx=(0, 10))
+        search_entry.bind("<KeyRelease>", lambda _e: self.apply_template_debug_filters(reset_page=True))
+
+        self.template_debug_filter_var = ctk.StringVar(value="全部")
+        filter_menu = ctk.CTkOptionMenu(
+            header,
+            width=130,
+            height=30,
+            values=["全部", "最近失败/问题"],
+            variable=self.template_debug_filter_var,
+            command=lambda _v: self.apply_template_debug_filters(reset_page=True),
+        )
+        filter_menu.pack(side="left", padx=(0, 10))
+
+        categories = ["全部分类"]
+        try:
+            categories.extend(sorted({self.get_template_category(item["name"]) for item in self.list_template_files()}))
+        except Exception:
+            pass
+        self.template_debug_category_var = ctk.StringVar(value="全部分类")
+        category_menu = ctk.CTkOptionMenu(
+            header,
+            width=130,
+            height=30,
+            values=categories,
+            variable=self.template_debug_category_var,
+            command=lambda _v: self.apply_template_debug_filters(reset_page=True),
+        )
+        category_menu.pack(side="left", padx=(0, 10))
+
+        ctk.CTkButton(
+            header,
+            text="保存",
+            width=74,
+            height=30,
+            fg_color="#2EA043",
+            hover_color="#238636",
+            command=self.save_template_debug_thresholds,
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            header,
+            text="全部恢复默认",
+            width=110,
+            height=30,
+            fg_color="#7D3C98",
+            hover_color="#633974",
+            command=self.reset_all_template_debug_thresholds,
+        ).pack(side="left", padx=(0, 10))
+
+        self.template_debug_issue_text = ctk.CTkTextbox(
+            header,
+            width=430,
+            height=70,
+            state="disabled",
+            wrap="word",
+            font=ctk.CTkFont(size=12),
+        )
+        self.template_debug_issue_text.pack(side="right", fill="y", padx=12, pady=10)
+
+        table_header = ctk.CTkFrame(self.template_debug_win, fg_color="#2B2B2B", height=34, corner_radius=6)
+        table_header.pack(fill="x", padx=12, pady=(0, 6))
+        table_header.pack_propagate(False)
+        for text, width in [
+            ("模板", 185),
+            ("预览", 72),
+            ("阈值", 180),
+            ("最近得分", 118),
+            ("状态", 155),
+            ("分类/组合/用途", 360),
+            ("操作", 115),
+        ]:
+            ctk.CTkLabel(table_header, text=text, width=width, anchor="w", font=ctk.CTkFont(weight="bold")).pack(
+                side="left", padx=4
+            )
+
+        self.template_debug_list_frame = ctk.CTkScrollableFrame(self.template_debug_win, fg_color="#1E1E1E")
+        self.template_debug_list_frame.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+        pager = ctk.CTkFrame(self.template_debug_win, fg_color="#20242A", height=38, corner_radius=8)
+        pager.pack(fill="x", padx=12, pady=(0, 12))
+        pager.pack_propagate(False)
+        self.template_debug_prev_btn = ctk.CTkButton(
+            pager,
+            text="上一页",
+            width=78,
+            height=28,
+            fg_color="#566573",
+            hover_color="#424949",
+            command=lambda: self.change_template_debug_page(-1),
+        )
+        self.template_debug_prev_btn.pack(side="left", padx=(10, 8), pady=5)
+        self.template_debug_page_label = ctk.CTkLabel(pager, text="", width=260, anchor="w")
+        self.template_debug_page_label.pack(side="left", padx=(0, 8))
+        self.template_debug_next_btn = ctk.CTkButton(
+            pager,
+            text="下一页",
+            width=78,
+            height=28,
+            fg_color="#566573",
+            hover_color="#424949",
+            command=lambda: self.change_template_debug_page(1),
+        )
+        self.template_debug_next_btn.pack(side="left", padx=(0, 8), pady=5)
+        ctk.CTkLabel(
+            pager,
+            text="测试功能：尚未完整测试。为避免卡顿，模板行按页懒加载；搜索/筛选后仅渲染当前页。",
+            text_color="#A0A0A0",
+            font=ctk.CTkFont(size=12),
+        ).pack(side="left", padx=(10, 0))
+
+        self.template_debug_all_items = self.list_template_files()
+        self.apply_template_debug_filters(reset_page=True)
+
+        self.refresh_template_debug_window(update_filters=False)
+
+    def create_template_debug_row(self, item):
+        template_name = item["name"]
+        metadata = self.get_template_metadata(template_name)
+        category = metadata.get("category", "模板")
+        group_id = metadata.get("group_id", "")
+        role = metadata.get("role", "")
+        description = metadata.get("description", self.get_template_description(template_name))
+        full_description = f"[{category}] 组:{group_id or '-'} 角色:{role or '-'}\n{description}"
+        row = ctk.CTkFrame(self.template_debug_list_frame, fg_color="#262626", corner_radius=6)
+        row.pack(fill="x", pady=3, padx=2)
+
+        ctk.CTkLabel(row, text=item["rel_path"], width=185, anchor="w", font=ctk.CTkFont(size=12)).pack(side="left", padx=4)
+
+        preview_label = ctk.CTkLabel(row, text="", width=72)
+        try:
+            img = Image.open(item["full_path"])
+            img.thumbnail((64, 42))
+            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+            self.template_debug_images.append(ctk_img)
+            preview_label.configure(image=ctk_img)
+        except Exception:
+            preview_label.configure(text="无预览", font=ctk.CTkFont(size=11))
+        preview_label.pack(side="left", padx=4)
+
+        threshold_value = self.get_template_debug_row_threshold(template_name)
+        value_var = ctk.StringVar(value=f"{threshold_value:.2f}")
+        entry = ctk.CTkEntry(row, width=54, height=26, justify="center", textvariable=value_var)
+        entry.pack(side="left", padx=(4, 4))
+        slider = ctk.CTkSlider(row, width=116, from_=0.30, to=0.95, number_of_steps=65)
+        slider.set(threshold_value)
+        slider.pack(side="left", padx=(0, 4))
+        dirty_state = {"dirty": False}
+
+        def on_slider(value, var=value_var, name=template_name):
+            dirty_state["dirty"] = True
+            var.set(f"{float(value):.2f}")
+            if not self.template_debug_syncing:
+                self.sync_template_debug_group_value(name, float(value))
+
+        def on_entry_commit(_event=None, s=slider, var=value_var, name=template_name):
+            value = self.clamp_template_threshold(var.get())
+            dirty_state["dirty"] = True
+            var.set(f"{value:.2f}")
+            s.set(value)
+            if not self.template_debug_syncing:
+                self.sync_template_debug_group_value(name, value)
+
+        slider.configure(command=on_slider)
+        entry.bind("<FocusOut>", on_entry_commit)
+        entry.bind("<Return>", on_entry_commit)
+
+        score_label = ctk.CTkLabel(row, text="-", width=118, anchor="w", font=ctk.CTkFont(size=12))
+        score_label.pack(side="left", padx=4)
+        issue_label = ctk.CTkLabel(row, text="未记录", width=155, anchor="w", font=ctk.CTkFont(size=12), text_color="#A0A0A0")
+        issue_label.pack(side="left", padx=4)
+        desc_label = ctk.CTkLabel(row, text=full_description, width=360, anchor="w", wraplength=350, font=ctk.CTkFont(size=12))
+        desc_label.pack(side="left", padx=4)
+
+        def reset_one(name=template_name, s=slider, var=value_var):
+            self.reset_template_group_threshold(name)
+            for member in self.get_template_group_members(name):
+                self.template_debug_pending_thresholds.pop(member, None)
+                member_row = self.template_debug_rows.get(member)
+                if not member_row:
+                    continue
+                member_row["entry_var"].set("0.75")
+                member_row["slider"].set(0.75)
+                member_row["original_value"] = 0.75
+                member_row.get("dirty_state", {})["dirty"] = False
+            self.save_runtime_config()
+            self.log(f"模板组合阈值已恢复默认: {self.get_template_group_id(name) or name}")
+
+        ctk.CTkButton(
+            row,
+            text="重置",
+            width=70,
+            height=26,
+            fg_color="#566573",
+            hover_color="#424949",
+            command=reset_one,
+        ).pack(side="left", padx=4)
+
+        self.template_debug_rows[template_name] = {
+            "frame": row,
+            "description": description,
+            "category": category,
+            "group_id": group_id,
+            "role": role,
+            "entry_var": value_var,
+            "slider": slider,
+            "original_value": threshold_value,
+            "dirty_state": dirty_state,
+            "score_label": score_label,
+            "issue_label": issue_label,
+            "rel_path": item["rel_path"],
+        }
+
+    def sync_template_debug_group_value(self, template_name, value):
+        group_id = self.get_template_group_id(template_name)
+        if not group_id:
+            return
+        value = self.clamp_template_threshold(value)
+        self.template_debug_syncing = True
+        try:
+            for member in self.get_template_group_members(template_name):
+                self.template_debug_pending_thresholds[member] = value
+                if member == template_name:
+                    continue
+                row = self.template_debug_rows.get(member)
+                if not row:
+                    continue
+                row["entry_var"].set(f"{value:.2f}")
+                row["slider"].set(value)
+                row.get("dirty_state", {})["dirty"] = True
+        finally:
+            self.template_debug_syncing = False
+
+    def collect_template_debug_visible_values(self):
+        for template_name, row in list(self.template_debug_rows.items()):
+            try:
+                self.template_debug_pending_thresholds[template_name] = self.clamp_template_threshold(row["entry_var"].get())
+            except Exception:
+                pass
+
+    def get_template_debug_row_threshold(self, template_name):
+        if template_name in self.template_debug_pending_thresholds:
+            return self.clamp_template_threshold(self.template_debug_pending_thresholds[template_name])
+        return self.get_template_threshold(template_name, 0.75)
+
+    def clear_template_debug_visible_rows(self):
+        for row in list(self.template_debug_rows.values()):
+            try:
+                row["frame"].destroy()
+            except Exception:
+                pass
+        self.template_debug_rows = {}
+        self.template_debug_images = []
+
+    def change_template_debug_page(self, delta):
+        self.collect_template_debug_visible_values()
+        total = len(self.template_debug_filtered_items)
+        max_page = max(0, (total - 1) // self.template_debug_page_size)
+        self.template_debug_page = max(0, min(max_page, self.template_debug_page + int(delta)))
+        self.render_template_debug_current_page()
+
+    def render_template_debug_current_page(self):
+        win = self.__dict__.get("template_debug_win")
+        if win is None or not win.winfo_exists():
+            return
+
+        self.clear_template_debug_visible_rows()
+        total = len(self.template_debug_filtered_items)
+        page_size = self.template_debug_page_size
+        max_page = max(0, (total - 1) // page_size)
+        self.template_debug_page = max(0, min(max_page, self.template_debug_page))
+        start = self.template_debug_page * page_size
+        end = min(total, start + page_size)
+
+        for item in self.template_debug_filtered_items[start:end]:
+            self.create_template_debug_row(item)
+
+        if self.template_debug_page_label is not None:
+            if total:
+                text = f"第 {self.template_debug_page + 1}/{max_page + 1} 页，显示 {start + 1}-{end} / {total} 个模板"
+            else:
+                text = "没有符合条件的模板"
+            self.template_debug_page_label.configure(text=text)
+        if self.template_debug_prev_btn is not None:
+            self.template_debug_prev_btn.configure(state="normal" if self.template_debug_page > 0 else "disabled")
+        if self.template_debug_next_btn is not None:
+            self.template_debug_next_btn.configure(state="normal" if self.template_debug_page < max_page else "disabled")
+
+        self.refresh_template_debug_window(update_filters=False)
+
+    def save_template_debug_thresholds(self):
+        self.collect_template_debug_visible_values()
+        saved_count = 0
+        thresholds = self.config.setdefault("template_thresholds", {})
+        candidate_names = set(self.template_debug_pending_thresholds) | set(self.template_debug_rows) | set(thresholds)
+        for template_name in sorted(candidate_names, key=str.lower):
+            row = self.template_debug_rows.get(template_name)
+            value = self.clamp_template_threshold(
+                self.template_debug_pending_thresholds.get(
+                    template_name,
+                    row["entry_var"].get() if row else self.get_template_threshold(template_name, 0.75),
+                )
+            )
+            if row:
+                row["entry_var"].set(f"{value:.2f}")
+                row["slider"].set(value)
+            should_save = (
+                bool(row and row.get("dirty_state", {}).get("dirty"))
+                or template_name in thresholds
+                or template_name in self.template_debug_pending_thresholds
+            )
+            if should_save:
+                self.set_template_group_threshold(template_name, value)
+                if row:
+                    row["original_value"] = value
+                    row.get("dirty_state", {})["dirty"] = False
+                saved_count += 1
+        self.template_debug_pending_thresholds = {}
+        for template_name, row in self.template_debug_rows.items():
+            value = self.get_template_threshold(template_name, row.get("original_value", 0.75))
+            row["entry_var"].set(f"{value:.2f}")
+            row["slider"].set(value)
+            row["original_value"] = value
+            row.get("dirty_state", {})["dirty"] = False
+        self.save_runtime_config()
+        self.log(f"模板调试阈值已保存：{saved_count} 个覆盖项。未修改模板继续使用调用点默认阈值。")
+        self.refresh_template_debug_window()
+
+    def reset_all_template_debug_thresholds(self):
+        self.config["template_thresholds"] = {}
+        self.template_debug_pending_thresholds = {}
+        for row in self.template_debug_rows.values():
+            row["entry_var"].set("0.75")
+            row["slider"].set(0.75)
+            row["original_value"] = 0.75
+            row.get("dirty_state", {})["dirty"] = False
+        self.save_runtime_config()
+        self.log("所有模板阈值已恢复默认。")
+        self.refresh_template_debug_window()
+
+    def apply_template_debug_filters(self, reset_page=False):
+        if not self.template_debug_all_items:
+            return
+        self.collect_template_debug_visible_values()
+        search_text = ""
+        filter_text = "全部"
+        category_text = "全部分类"
+        try:
+            search_text = self.template_debug_search_var.get().strip().lower()
+            filter_text = self.template_debug_filter_var.get()
+            category_text = self.template_debug_category_var.get()
+        except Exception:
+            pass
+
+        problem_templates = {record.get("template") for record in self.get_recent_template_match_issues(limit=300)}
+        filtered = []
+        for item in self.template_debug_all_items:
+            template_name = item["name"]
+            metadata = self.get_template_metadata(template_name)
+            haystack = (
+                f"{template_name} {item['rel_path']} {metadata.get('description', '')} "
+                f"{metadata.get('category', '')} {metadata.get('group_id', '')} {metadata.get('role', '')}"
+            ).lower()
+            visible = True
+            if search_text and search_text not in haystack:
+                visible = False
+            if filter_text == "最近失败/问题" and template_name not in problem_templates:
+                visible = False
+            if category_text != "全部分类" and metadata.get("category") != category_text:
+                visible = False
+
+            if visible:
+                filtered.append(item)
+
+        self.template_debug_filtered_items = filtered
+        if reset_page:
+            self.template_debug_page = 0
+        self.render_template_debug_current_page()
+
+    def refresh_template_debug_row(self, record):
+        win = self.__dict__.get("template_debug_win")
+        if win is None or not win.winfo_exists():
+            return
+
+        def update():
+            try:
+                template_name = record.get("template")
+                row = self.template_debug_rows.get(template_name)
+                if row:
+                    row["score_label"].configure(
+                        text=f"{record.get('score', 0.0):.2f}/{record.get('threshold', 0.0):.2f}"
+                    )
+                    issue = record.get("issue", "")
+                    color = "#2EA043" if record.get("matched") else "#F5B041"
+                    if issue.startswith("基本无匹配"):
+                        color = "#E74C3C"
+                    row["issue_label"].configure(text=issue or "未记录", text_color=color)
+                self.refresh_template_debug_issues()
+            except Exception:
+                pass
+
+        self.ui_call(update)
+
+    def refresh_template_debug_issues(self):
+        if self.template_debug_issue_text is None:
+            return
+        issues = self.get_recent_template_match_issues(limit=8)
+        lines = []
+        for record in issues:
+            lines.append(
+                f"{record.get('timestamp', '')} {record.get('template')} "
+                f"{record.get('score', 0.0):.2f}/{record.get('threshold', 0.0):.2f} "
+                f"{record.get('issue', '')}"
+            )
+        if not lines:
+            lines = ["暂无运行中模板问题。"]
+        try:
+            self.template_debug_issue_text.configure(state="normal")
+            self.template_debug_issue_text.delete("1.0", "end")
+            self.template_debug_issue_text.insert("end", "\n".join(lines))
+            self.template_debug_issue_text.configure(state="disabled")
+        except Exception:
+            pass
+
+    def refresh_template_debug_window(self, update_filters=True):
+        recent_records = self.get_recent_template_match_records(limit=300)
+        latest_by_template = {}
+        for record in recent_records:
+            latest_by_template[record.get("template")] = record
+        for template_name, record in latest_by_template.items():
+            row = self.template_debug_rows.get(template_name)
+            if not row:
+                continue
+            row["score_label"].configure(text=f"{record.get('score', 0.0):.2f}/{record.get('threshold', 0.0):.2f}")
+            issue = record.get("issue", "") or "未记录"
+            color = "#2EA043" if record.get("matched") else "#F5B041"
+            if issue.startswith("基本无匹配"):
+                color = "#E74C3C"
+            row["issue_label"].configure(text=issue, text_color=color)
+        self.refresh_template_debug_issues()
+        if update_filters:
+            self.apply_template_debug_filters()
+
     def open_support_window(self):
         if self.support_win is not None and self.support_win.winfo_exists():
             self.support_win.focus()
@@ -2291,6 +3352,8 @@ class FH_UltimateBot(ctk.CTk):
                 "log_path": LOG_FILE,
                 "screenshot_path": screenshot_path if screenshot_saved else None,
                 "screenshot_error": screenshot_error,
+                "recent_match_scores": self.get_recent_template_match_records(limit=80),
+                "recent_match_issues": self.get_recent_template_match_issues(limit=40),
                 "report_hint": {
                     "github_issues": "https://github.com/HikigayaHachiman0211/FH6Auto/issues",
                     "runtime_log": LOG_FILE,
@@ -3218,6 +4281,14 @@ class FH_UltimateBot(ctk.CTk):
     def find_image_in_screen(self, screen_bgr, template_path, region=None, threshold=0.75, fast_mode=True):
         try:
             scales_to_try = self.get_scales_to_try(fast_mode=fast_mode)
+            effective_threshold = self.get_template_threshold(template_path, threshold)
+            best_score = -1.0
+            best_scale = None
+            best_loc = None
+            best_shape = None
+            best_pos = None
+            matched_pos = None
+            matched_scale = None
 
             for scale in scales_to_try:
                 tpl_c, actual_path = self.get_scaled_template(template_path, scale)
@@ -3232,14 +4303,45 @@ class FH_UltimateBot(ctk.CTk):
 
                 res = cv2.matchTemplate(screen_bgr, tpl_c, cv2.TM_CCOEFF_NORMED)
                 _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                max_val = float(max_val)
+                if max_val > best_score:
+                    best_score = max_val
+                    best_scale = scale
+                    best_loc = max_loc
+                    best_shape = (w, h)
+                    best_pos = (
+                        max_loc[0] + w // 2 + (region[0] if region else 0),
+                        max_loc[1] + h // 2 + (region[1] if region else 0),
+                    )
 
-                if max_val >= threshold:
+                if matched_pos is None and max_val >= effective_threshold:
                     pos = (
                         max_loc[0] + w // 2 + (region[0] if region else 0),
                         max_loc[1] + h // 2 + (region[1] if region else 0),
                     )
-                    self.last_positions[template_path] = pos
-                    return pos
+                    matched_pos = pos
+                    matched_scale = scale
+
+            if best_score < 0:
+                best_score = 0.0
+
+            self.record_template_match({
+                "template": template_path,
+                "score": best_score,
+                "threshold": effective_threshold,
+                "default_threshold": float(threshold),
+                "scale": matched_scale if matched_scale is not None else (best_scale if best_scale is not None else 1.0),
+                "pos": matched_pos if matched_pos is not None else best_pos,
+                "best_loc": best_loc,
+                "best_shape": best_shape,
+                "matched": matched_pos is not None,
+                "region_label": self.describe_match_region(region),
+                "fast_mode": bool(fast_mode),
+            })
+
+            if matched_pos is not None:
+                self.last_positions[template_path] = matched_pos
+                return matched_pos
 
             return None
 
@@ -3291,6 +4393,14 @@ class FH_UltimateBot(ctk.CTk):
         try:
             screen_bgr = self.capture_region(region)
             scales_to_try = self.get_scales_to_try(fast_mode=fast_mode)
+            main_threshold = self.get_template_threshold(main_path, threshold)
+            sub_threshold = self.get_template_threshold(sub_path, threshold)
+            best_main_score = 0.0
+            best_main_scale = 1.0
+            best_main_pos = None
+            best_sub_score = 0.0
+            matched_pos = None
+            matched_scale = None
             for scale in scales_to_try:
                 # 1. 结合新架构缓存直接读取缩放好的图像
                 main_tpl_c, _ = self.get_scaled_template(main_path, scale)
@@ -3302,7 +4412,15 @@ class FH_UltimateBot(ctk.CTk):
                     continue
                 # 2. 一阶匹配：寻找全屏符合的主目标
                 res_main = cv2.matchTemplate(screen_bgr, main_tpl_c, cv2.TM_CCOEFF_NORMED)
-                loc = np.where(res_main >= threshold)
+                _, scale_main_score, _, scale_main_loc = cv2.minMaxLoc(res_main)
+                if float(scale_main_score) > best_main_score:
+                    best_main_score = float(scale_main_score)
+                    best_main_scale = scale
+                    best_main_pos = (
+                        scale_main_loc[0] + w_m // 2 + (region[0] if region else 0),
+                        scale_main_loc[1] + h_m // 2 + (region[1] if region else 0),
+                    )
+                loc = np.where(res_main >= main_threshold)
                 checked = set() # 【关键优化】：坐标去重，解决几十万次无效循环造成的卡顿
                 for pt in zip(*loc[::-1]):
                     x, y = pt
@@ -3320,11 +4438,59 @@ class FH_UltimateBot(ctk.CTk):
                         continue
                     # 4. 二阶匹配：验证提取范围内是否包含子元素
                     res_sub = cv2.matchTemplate(sub_roi, sub_tpl_c, cv2.TM_CCOEFF_NORMED)
-                    if cv2.minMaxLoc(res_sub)[1] >= threshold:
-                        return (
+                    sub_score = float(cv2.minMaxLoc(res_sub)[1])
+                    best_sub_score = max(best_sub_score, sub_score)
+                    if sub_score >= sub_threshold:
+                        matched_pos = (
                             x + w_m // 2 + (region[0] if region else 0),
                             y + h_m // 2 + (region[1] if region else 0),
                         )
+                        matched_scale = scale
+                        self.record_template_match({
+                            "template": main_path,
+                            "score": best_main_score,
+                            "threshold": main_threshold,
+                            "default_threshold": float(threshold),
+                            "scale": matched_scale,
+                            "pos": matched_pos,
+                            "matched": True,
+                            "region_label": self.describe_match_region(region),
+                            "fast_mode": bool(fast_mode),
+                        })
+                        self.record_template_match({
+                            "template": sub_path,
+                            "score": best_sub_score,
+                            "threshold": sub_threshold,
+                            "default_threshold": float(threshold),
+                            "scale": matched_scale,
+                            "pos": matched_pos,
+                            "matched": True,
+                            "region_label": self.describe_match_region(region),
+                            "fast_mode": bool(fast_mode),
+                        })
+                        return matched_pos
+            self.record_template_match({
+                "template": main_path,
+                "score": best_main_score,
+                "threshold": main_threshold,
+                "default_threshold": float(threshold),
+                "scale": best_main_scale,
+                "pos": best_main_pos,
+                "matched": False,
+                "region_label": self.describe_match_region(region),
+                "fast_mode": bool(fast_mode),
+            })
+            self.record_template_match({
+                "template": sub_path,
+                "score": best_sub_score,
+                "threshold": sub_threshold,
+                "default_threshold": float(threshold),
+                "scale": best_main_scale,
+                "pos": best_main_pos,
+                "matched": False,
+                "region_label": self.describe_match_region(region),
+                "fast_mode": bool(fast_mode),
+            })
             return None
         except Exception as e:
             self.log(f"find_image_with_element 异常: {e}")
@@ -3418,9 +4584,14 @@ class FH_UltimateBot(ctk.CTk):
             screen_edge = self.to_edge_image(screen_bgr)
 
             scales_to_try = self.get_scales_to_try(fast_mode=fast_mode)
+            effective_main_threshold = self.get_template_threshold(main_path, main_threshold)
+            effective_like_threshold = self.get_template_threshold(sub_path, like_threshold)
+            effective_final_threshold = self.get_template_threshold(main_path, final_threshold)
 
             best_score = 0.0
             best_pos = None
+            best_scale = 1.0
+            best_like_score = 0.0
 
             for scale in scales_to_try:
                 main_tpl_c, _ = self.get_scaled_template(main_path, scale)
@@ -3440,7 +4611,7 @@ class FH_UltimateBot(ctk.CTk):
 
                 # 用彩色主模板先找候选，但阈值放低一点，后面再综合筛
                 res_main = cv2.matchTemplate(screen_bgr, main_tpl_c, cv2.TM_CCOEFF_NORMED)
-                loc = np.where(res_main >= main_threshold)
+                loc = np.where(res_main >= effective_main_threshold)
 
                 checked_points = set()
 
@@ -3476,8 +4647,9 @@ class FH_UltimateBot(ctk.CTk):
                         max(0, x - pad):min(screen_bgr.shape[1], x + w_m + pad),
                     ]
                     like_score = self.match_template_score(sub_roi, sub_tpl_c)
+                    best_like_score = max(best_like_score, like_score)
 
-                    if like_score < like_threshold:
+                    if like_score < effective_like_threshold:
                         continue
 
                     final_score = (
@@ -3490,12 +4662,37 @@ class FH_UltimateBot(ctk.CTk):
 
                     if final_score > best_score:
                         best_score = final_score
+                        best_scale = scale
                         best_pos = (
                             x + w_m // 2 + (region[0] if region else 0),
                             y + h_m // 2 + (region[1] if region else 0),
                         )
 
-            if best_score >= final_threshold:
+            matched = best_score >= effective_final_threshold
+            self.record_template_match({
+                "template": main_path,
+                "score": best_score,
+                "threshold": effective_final_threshold,
+                "default_threshold": float(final_threshold),
+                "scale": best_scale,
+                "pos": best_pos,
+                "matched": matched,
+                "region_label": self.describe_match_region(region),
+                "fast_mode": bool(fast_mode),
+            })
+            self.record_template_match({
+                "template": sub_path,
+                "score": best_like_score,
+                "threshold": effective_like_threshold,
+                "default_threshold": float(like_threshold),
+                "scale": best_scale,
+                "pos": best_pos,
+                "matched": matched and best_like_score >= effective_like_threshold,
+                "region_label": self.describe_match_region(region),
+                "fast_mode": bool(fast_mode),
+            })
+
+            if matched:
                 self.log(f"[multi_match] 命中 {main_path} 最终分数: {best_score:.3f}")
                 return best_pos
 
@@ -4940,6 +6137,9 @@ class FH_UltimateBot(ctk.CTk):
         if self.car_counter >= target_count:
             return True
 
+        if not self.ensure_cr_for_buy_cycle(target_count):
+            return False
+
         self.update_running_ui("批量买车", self.car_counter, target_count)
 
         self.log("准备验证/进入菜单...")
@@ -5220,10 +6420,32 @@ class FH_UltimateBot(ctk.CTk):
         self.pipeline_next_step_override = "buy"
         return False
 
+    def is_cj_vehicle_page_visible(self):
+        return bool(self.wait_for_any_image(
+            ["UandT-w.png", "UandT-b.png"],
+            region=self.regions["全界面"],
+            threshold=0.65,
+            timeout=0.45,
+            interval=0.15,
+            fast_mode=True,
+        ))
+
+    def enter_cj_design_and_paint_by_keyboard_fallback(self):
+        self.log("车辆页已可见但未命中设计与喷漆模板，尝试键盘兜底：从我的车辆向下两次进入设计与喷漆。")
+        for _ in range(2):
+            if not self.is_running:
+                return False
+            self.hw_press("down", delay=0.12)
+            time.sleep(0.25)
+        self.hw_press("enter", delay=0.12)
+        time.sleep(0.8)
+        return True
+
     def select_cj_car_via_design_and_paint(self):
         self.log("进入设计与喷漆...")
 
         pos_design = None
+        entered_design = False
         for i in range(12):
             if not self.is_running:
                 return False
@@ -5239,15 +6461,22 @@ class FH_UltimateBot(ctk.CTk):
             if pos_design:
                 break
 
+            if self.is_cj_vehicle_page_visible():
+                if self.enter_cj_design_and_paint_by_keyboard_fallback():
+                    entered_design = True
+                    break
+                return False
+
             self.hw_press("right" if i < 6 else "left", delay=0.15)
             time.sleep(0.3)
 
-        if not pos_design:
+        if not pos_design and not entered_design:
             self.log("未找到设计与喷漆")
             return False
 
-        self.game_click(pos_design)
-        time.sleep(0.6)
+        if pos_design:
+            self.game_click(pos_design)
+            time.sleep(0.6)
 
         self.dismiss_cj_dsi_prompt()
 
@@ -5931,9 +7160,20 @@ class FH_UltimateBot(ctk.CTk):
         time.sleep(2.0)
         return True
 
+    def reset_sell_tail_position(self, reason=""):
+        self.sell_tail_position_ready = False
+        self.sell_fresh_skip_count = 0
+        self.sell_stop_no_deletable = False
+        if reason:
+            self.log(f"删车：重置末页定位状态 ({reason})。")
+
     def select_sell_last_subaru_card(self):
         if not self.ensure_sell_car_grid_ready(reason="select_last_subaru"):
             return False
+
+        if self.sell_tail_position_ready:
+            self.log("删车：沿用上次删除后的末页位置，不重复 PageDown。")
+            return True
 
         self.log("删车：筛选结果列表 PageDown 到尾部，准备删除当前选中车辆。")
         for _ in range(20):
@@ -5942,7 +7182,43 @@ class FH_UltimateBot(ctk.CTk):
             self.hw_press("pagedown", delay=0.12)
             time.sleep(0.18)
         time.sleep(0.8)
-        return self.ensure_sell_car_grid_ready(reason="after_pagedown_tail")
+        ready = self.ensure_sell_car_grid_ready(reason="after_pagedown_tail")
+        if ready:
+            self.sell_tail_position_ready = True
+        return ready
+
+    def selected_sell_car_has_fresh_tag(self):
+        pos = self.wait_for_image(
+            "FreshTagText.png",
+            region=self.regions["全界面"],
+            threshold=0.70,
+            timeout=0.7,
+            interval=0.15,
+            fast_mode=True,
+        )
+        if pos:
+            self.log("删车保护：当前候选车辆检测到全新标签，跳过该车。")
+            return True
+        return False
+
+    def prepare_deletable_sell_car(self, max_fresh_skips=24):
+        for _ in range(max_fresh_skips + 1):
+            if not self.is_running:
+                return False
+            if not self.ensure_sell_car_grid_ready(reason="fresh_tag_guard"):
+                return False
+            if not self.selected_sell_car_has_fresh_tag():
+                return True
+
+            self.sell_fresh_skip_count += 1
+            if self.sell_fresh_skip_count > max_fresh_skips:
+                self.sell_stop_no_deletable = True
+                self.log("删车保护：连续候选车辆均带全新标签，停止删车以避免误删。")
+                self.capture_failure_snapshot("sell_only_fresh_tag_candidates", module_name="sell")
+                return False
+
+            self.hw_press("left", delay=0.08)
+            time.sleep(0.45)
 
     def click_sell_remove_option_from_action_menu(self):
         option_templates = ["RemoveFromGarageWhite.png", "RemoveFromGarageBlack.png"]
@@ -6025,17 +7301,24 @@ class FH_UltimateBot(ctk.CTk):
         if not self.select_sell_last_subaru_card():
             return False
 
+        if not self.prepare_deletable_sell_car():
+            return False
+
         if not self.remove_selected_sell_car():
             self.capture_failure_snapshot("sell_remove_selected_car_failed", module_name="sell")
             return False
 
-        return self.wait_for_sell_ready_after_delete()
+        ready = self.wait_for_sell_ready_after_delete()
+        if ready:
+            self.sell_tail_position_ready = True
+        return ready
 
     def sell_consumable_car(self, target_count):
         # 如果后续你单独增加 sell_counter，建议把 cj_counter 全部替换掉
         if self.sc_count >= target_count:
             return True
 
+        self.reset_sell_tail_position("module_start")
         self.update_running_ui("移除车辆", self.sc_count, target_count)
 
         self.log("准备验证/进入菜单...")
@@ -6147,6 +7430,7 @@ class FH_UltimateBot(ctk.CTk):
         if not self.ensure_sell_car_grid_ready(reason="after_precise_filter"):
             return False
 
+        self.reset_sell_tail_position("after_precise_filter")
         self.log("开始删除筛选结果中的重复项+B级+全轮驱动+传奇车辆。请确认筛选结果已人工审核。")
 
         while self.sc_count < target_count:
@@ -6155,6 +7439,9 @@ class FH_UltimateBot(ctk.CTk):
                 return False
 
             if not self.delete_one_sell_car():
+                if self.sell_stop_no_deletable:
+                    self.log("删车：未找到无全新标签的可删候选，提前结束删车模块。")
+                    return True
                 return False
 
             self.sc_count += 1
@@ -6173,8 +7460,9 @@ class FH_UltimateBot(ctk.CTk):
     # --- 模块：刷CR点 ---
     # ==========================================
     def get_cr_car_profile(self):
-        car_type = self.get_selected_cr_car_type()
+        return self.get_cr_car_profile_by_type(self.get_selected_cr_car_type())
 
+    def get_cr_car_profile_by_type(self, car_type):
         if car_type == "toyota":
             return {
                 "type": "toyota",
@@ -6194,6 +7482,84 @@ class FH_UltimateBot(ctk.CTk):
             "car_templates": ["WulingRaceCar.png", "WulingRaceCar2.png"],
             "negative_templates": ["ToyotaAE86SpecialMisdetect.png"],
         }
+
+    def get_cr_shortfall_car_cost(self):
+        return self.get_config_int("cr_shortfall_car_cost", 85000, min_value=1)
+
+    def get_cr_shortfall_settlement_laps(self):
+        entry_widget = getattr(self, "entry_cr_shortfall_settlement_laps", None)
+        if entry_widget is not None:
+            return self.get_positive_entry_value(
+                entry_widget,
+                self.config.get("cr_shortfall_settlement_laps", self.config.get("cr_settlement_laps", 5)),
+            )
+        return self.get_config_int(
+            "cr_shortfall_settlement_laps",
+            self.config.get("cr_settlement_laps", 5),
+            min_value=1,
+        )
+
+    def get_cr_shortfall_car_type(self):
+        option_widget = getattr(self, "option_cr_shortfall_car_type", None)
+        if option_widget is not None:
+            return "toyota" if option_widget.get() == "丰田" else "wuling"
+        return self.config.get("cr_shortfall_car_type", self.config.get("cr_car_type", "wuling"))
+
+    def ensure_cr_for_buy_cycle(self, target_count):
+        if self.car_counter >= target_count:
+            return True
+
+        remaining = max(0, int(target_count) - int(self.car_counter))
+        required_cr = remaining * self.get_cr_shortfall_car_cost()
+        if required_cr <= 0:
+            return True
+
+        self.log(f"CR兜底：买车前检测，剩余 {remaining} 辆，预计需要 {required_cr:,} CR。")
+        current_cr = self.read_current_cr_value()
+        if current_cr is None:
+            self.log("CR兜底：无法识别当前 CR，停止买车以避免余额不足导致流程失控。")
+            self.capture_failure_snapshot("cr_shortfall_current_cr_unreadable", module_name="buy")
+            return False
+
+        if current_cr >= required_cr:
+            self.log(f"CR兜底：当前 {current_cr:,} CR，已足够完成本轮买车。")
+            return True
+
+        if not bool(self.config.get("cr_shortfall_fallback_enabled", True)):
+            self.log(
+                f"CR兜底已关闭：当前 {current_cr:,} CR，不足 {required_cr:,} CR，停止买车。"
+            )
+            self.capture_failure_snapshot(
+                "cr_shortfall_disabled_insufficient_cr",
+                module_name="buy",
+                details={"current_cr": current_cr, "required_cr": required_cr},
+            )
+            return False
+
+        self.log(
+            f"CR兜底：当前 {current_cr:,} CR，不足 {required_cr:,} CR，"
+            f"开始自动刷 CR 到目标值后继续买车。"
+        )
+        if not self.logic_cr_grind_until_target(required_cr):
+            self.capture_failure_snapshot(
+                "cr_shortfall_grind_failed",
+                module_name="buy",
+                details={"current_cr": current_cr, "required_cr": required_cr},
+            )
+            return False
+
+        final_cr = self.read_current_cr_value()
+        if final_cr is None or final_cr < required_cr:
+            self.log("CR兜底：刷 CR 后仍未确认余额足够，停止买车。")
+            self.capture_failure_snapshot(
+                "cr_shortfall_final_cr_insufficient",
+                module_name="buy",
+                details={"final_cr": final_cr, "required_cr": required_cr},
+            )
+            return False
+
+        self.log(f"CR兜底：当前 {final_cr:,} CR，已达到买车目标，返回批量买车流程。")
+        return True
 
     def get_cr_race_car_template_candidates(self, car_profile):
         templates = car_profile.get("car_templates") or []
@@ -7652,6 +9018,53 @@ class FH_UltimateBot(ctk.CTk):
         else:
             self.log(f"CR记录[{phase}]: 当前 {value:,}。")
         return True
+
+    def logic_cr_grind_until_target(self, target_cr):
+        car_type = self.get_cr_shortfall_car_type()
+        settlement_laps = self.get_cr_shortfall_settlement_laps()
+        car_profile = self.get_cr_car_profile_by_type(car_type)
+        self.config["cr_shortfall_car_type"] = car_type
+        self.config["cr_shortfall_settlement_laps"] = settlement_laps
+        self.save_runtime_config()
+
+        self.log(
+            f"CR兜底启动：车辆 {car_profile['label']}，周期结算 {settlement_laps} 圈，"
+            f"目标 {int(target_cr):,} CR。"
+        )
+
+        current_cr = self.read_current_cr_value()
+        if current_cr is not None and current_cr >= target_cr:
+            self.log(f"CR兜底：当前 {current_cr:,} CR 已达标。")
+            return True
+
+        while self.is_running:
+            if self.should_abort_for_process_loss({"phase": "cr_shortfall_loop"}):
+                return False
+
+            cr_retries = self.get_cr_step_retry_count()
+            if not self.execute_verified_step("CR兜底进入赛事页", self.enter_cr_event_page, retry_count=cr_retries):
+                return False
+            if not self.execute_verified_step("CR兜底选择车辆", lambda: self.select_cr_race_car(car_profile), retry_count=cr_retries):
+                return False
+            if not self.execute_verified_step("CR兜底开始赛事并开启自动驾驶", self.start_cr_race_and_autodrive, retry_count=cr_retries):
+                return False
+            if not self.wait_cr_lap_period(car_profile, settlement_laps):
+                return False
+            if not self.execute_verified_step("CR兜底周期退出赛事", self.exit_cr_race_for_settlement, retry_count=cr_retries):
+                return False
+
+            self.record_cr_value("CR不足兜底结算", settlement_laps, car_profile["lap_seconds"])
+            current_cr = self.read_current_cr_value()
+            if current_cr is None:
+                self.log("CR兜底：结算后无法读取 CR，停止兜底。")
+                return False
+            if current_cr >= target_cr:
+                self.log(f"CR兜底：当前 {current_cr:,} CR，达到目标 {int(target_cr):,} CR。")
+                return True
+
+            self.log(f"CR兜底：当前 {current_cr:,} CR，仍不足 {int(target_cr):,} CR，继续刷 CR。")
+
+        return False
 
     def logic_cr_grind(self):
         car_profile = self.get_cr_car_profile()
