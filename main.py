@@ -59,7 +59,7 @@ CACHE_DIR = os.path.join(APP_DIR, "cache")
 TEMPLATE_CACHE_FILE = os.path.join(CACHE_DIR, "template_cache.pkl")
 TEMPLATE_META_FILE = os.path.join(CACHE_DIR, "template_meta.json")
 DIAGNOSTICS_DIR = os.path.join(APP_DIR, "diagnostics")
-CURRENT_VERSION = "1.2.0"
+CURRENT_VERSION = "1.2.1"
 APP_DISPLAY_NAME = "FH6Auto by YSTO | 深度优化 SArB1e"
 ORIGINAL_AUTHOR_NAME = "原作者 YSTO"
 OPTIMIZER_NAME = "深度优化者 SArB1e"
@@ -347,6 +347,10 @@ class FH_UltimateBot(ctk.CTk):
         self.sell_tail_position_ready = False
         self.sell_fresh_skip_count = 0
         self.sell_stop_no_deletable = False
+        self.sell_candidate_records = []
+        self.sell_visited_candidate_signatures = set()
+        self.last_sell_candidate_signature = None
+        self.sell_force_next_big_loop = False
 
         self.init_regions()
 
@@ -852,8 +856,10 @@ class FH_UltimateBot(ctk.CTk):
             "UandT-b.png": ("CJ", "cj_upgrade_tuning", "黑底入口", "CJ 超级抽奖：升级与调教入口，黑底/选中状态"),
             "clsldcnw.png": ("CJ", "cj_skill_tree", "白底入口", "CJ 超级抽奖：车辆熟练度/技能树入口，白底状态"),
             "clsldcnb.png": ("CJ", "cj_skill_tree", "黑底入口", "CJ 超级抽奖：车辆熟练度/技能树入口，黑底/选中状态"),
-            "FreshTagText.png": ("删车/CJ", "fresh_car_tag", "全新文字", "删车保护/CJ 选车：车辆卡片上的全新标签文字，检测到则禁止删车"),
-            "newcartag.png": ("CJ", "fresh_car_tag", "全新图标", "CJ 选车：车辆卡片上的全新标签图标，用于定位待抽奖车辆"),
+            "FreshTagText.png": ("删车", "sell_fresh_tag", "全新文字", "删车保护：车辆卡片上的全新标签文字，检测到则禁止删车"),
+            "SellFreshTagText.png": ("删车", "sell_fresh_tag", "全新文字主模板", "删车保护：车辆卡片上的全新标签文字主模板，检测到则禁止删车"),
+            "SellFreshTagTextAlt.png": ("删车", "sell_fresh_tag", "全新文字备用模板", "删车保护：车辆卡片上的全新标签文字备用模板，检测到则禁止删车"),
+            "newcartag.png": ("CJ", "cj_fresh_tag", "全新图标", "CJ 选车：车辆卡片上的全新标签图标，用于定位待抽奖车辆"),
             "SPNE.png": ("CJ", "cj_skill_state", "技能点不足", "CJ 超级抽奖：技能点不足或技能已点完提示"),
             "EXPwU.png": ("CJ", "cj_skill_state", "经验技能", "CJ 超级抽奖：经验技能已升级/可用状态"),
             "DSI.png": ("CJ", "cj_prompt", "不再显示", "设计与喷漆首次提示：不再显示该消息"),
@@ -862,6 +868,8 @@ class FH_UltimateBot(ctk.CTk):
             "BNandUC.png": ("车辆菜单", "festival_buy_used", "入口", "嘉年华车辆与收藏：购买新车与二手车入口"),
             "RemoveFromGarageWhite.png": ("删车", "remove_from_garage", "白底选项", "删车：操作菜单中的从车库移除车辆选项，白底状态"),
             "RemoveFromGarageBlack.png": ("删车", "remove_from_garage", "黑底选项", "删车：操作菜单中的从车库移除车辆选项，黑底/选中状态"),
+            "SellDeletableCarLarge.png": ("删车", "sell_deletable_car", "非全新大模板", "删车模块：当前焦点车辆-非全新大模板，命中后才允许删除"),
+            "SellDeletableCarSmall.png": ("删车", "sell_deletable_car", "非全新小模板", "删车模块：当前焦点车辆-非全新小模板，命中后才允许删除"),
             "rc.png": ("车辆菜单", "car_action_menu", "操作菜单", "车辆操作菜单：上车/移除等操作弹窗锚点"),
             "collectionjournal.png": ("买车", "buy_collection_journal", "入口", "批量买车：嘉年华播放列表内的车辆收集簿入口"),
             "masterexplorer.png": ("买车", "buy_master_explorer", "入口", "批量买车：车辆收集簿内探索分类入口"),
@@ -3354,6 +3362,7 @@ class FH_UltimateBot(ctk.CTk):
                 "screenshot_error": screenshot_error,
                 "recent_match_scores": self.get_recent_template_match_records(limit=80),
                 "recent_match_issues": self.get_recent_template_match_issues(limit=40),
+                "recent_sell_candidate_records": list(getattr(self, "sell_candidate_records", [])[-40:]),
                 "report_hint": {
                     "github_issues": "https://github.com/HikigayaHachiman0211/FH6Auto/issues",
                     "runtime_log": LOG_FILE,
@@ -5273,6 +5282,7 @@ class FH_UltimateBot(ctk.CTk):
         self.cj_counter = 0
         self.sc_count = 0
         self.global_loop_current = 0
+        self.sell_force_next_big_loop = False
 
         def runner():
             pipeline_success = False
@@ -5362,6 +5372,25 @@ class FH_UltimateBot(ctk.CTk):
                             return False
                     #v1.0.1
                     # ====== 核心流转与无限循环逻辑 ======
+                    if step_name == "sell" and self.sell_force_next_big_loop:
+                        self.sell_force_next_big_loop = False
+                        self.global_loop_current += 1
+
+                        if self.global_loop_current > total_loops:
+                            self.log("删车：当前无可删车辆，且已达到总循环次数，任务结束。")
+                            break
+
+                        self.log(f"删车：当前无可删车辆，跳过删车并开启新一轮大循环 ({self.global_loop_current}/{total_loops})")
+                        if hasattr(self, "lbl_mini_loop"):
+                            self.ui_call(self.lbl_mini_loop.configure, text=f"大循环: {self.global_loop_current} / {total_loops}")
+
+                        self.race_counter = 0
+                        self.car_counter = 0
+                        self.cj_counter = 0
+                        self.sc_count = 0
+                        curr_idx = 0
+                        continue
+
                     next_idx = curr_idx + 1 # 默认前往下一步
                     override_step = self.pipeline_next_step_override
                     self.pipeline_next_step_override = None
@@ -7164,6 +7193,8 @@ class FH_UltimateBot(ctk.CTk):
         self.sell_tail_position_ready = False
         self.sell_fresh_skip_count = 0
         self.sell_stop_no_deletable = False
+        self.sell_visited_candidate_signatures = set()
+        self.last_sell_candidate_signature = None
         if reason:
             self.log(f"删车：重置末页定位状态 ({reason})。")
 
@@ -7187,38 +7218,459 @@ class FH_UltimateBot(ctk.CTk):
             self.sell_tail_position_ready = True
         return ready
 
-    def selected_sell_car_has_fresh_tag(self):
-        pos = self.wait_for_image(
+    def get_sell_deletable_templates(self):
+        return ["SellDeletableCarLarge.png", "SellDeletableCarSmall.png"]
+
+    def get_sell_fresh_tag_templates(self):
+        preferred_templates = [
+            "SellFreshTagText.png",
+            "SellFreshTagTextAlt.png",
             "FreshTagText.png",
+            "newcartag.png",
+        ]
+        try:
+            available_names = {item["name"] for item in self.list_template_files()}
+        except Exception:
+            available_names = set()
+
+        templates = [name for name in preferred_templates if not available_names or name in available_names]
+        return templates or ["FreshTagText.png"]
+
+    def summarize_recent_sell_candidates(self, limit=20):
+        recent = list(self.sell_candidate_records[-limit:])
+        summary = {
+            "total": len(recent),
+            "fresh_hits": 0,
+            "deletable_hits": 0,
+            "conflicts": 0,
+            "unconfirmed": 0,
+        }
+        for record in recent:
+            if record.get("fresh_tag"):
+                summary["fresh_hits"] += 1
+            if record.get("deletable"):
+                summary["deletable_hits"] += 1
+            if record.get("conflict"):
+                summary["conflicts"] += 1
+            if record.get("decision") in {"skip_unconfirmed", "skip_unknown"}:
+                summary["unconfirmed"] += 1
+        return summary
+
+    def get_template_match_record_count(self):
+        with self.template_match_records_lock:
+            return len(self.template_match_records)
+
+    def get_template_match_records_since(self, start_index):
+        with self.template_match_records_lock:
+            if start_index <= 0:
+                return list(self.template_match_records)
+            return list(self.template_match_records[start_index:])
+
+    def summarize_template_match_records(self, template_paths, records):
+        template_keys = {self.get_template_key(path) for path in template_paths}
+        relevant = [
+            dict(record)
+            for record in records
+            if self.get_template_key(record.get("template")) in template_keys
+        ]
+        if not relevant:
+            return {
+                "matched": False,
+                "best_template": None,
+                "best_score": 0.0,
+                "matched_template": None,
+                "matched_score": 0.0,
+                "threshold": None,
+                "attempt_count": 0,
+                "top_candidates": [],
+            }
+
+        best_record = max(relevant, key=lambda item: float(item.get("score", 0.0)))
+        matched_records = [item for item in relevant if item.get("matched")]
+        matched_record = max(matched_records, key=lambda item: float(item.get("score", 0.0))) if matched_records else None
+
+        top_candidates = []
+        for item in sorted(relevant, key=lambda row: float(row.get("score", 0.0)), reverse=True)[:3]:
+            top_candidates.append({
+                "template": item.get("template"),
+                "score": round(float(item.get("score", 0.0)), 4),
+                "threshold": round(float(item.get("threshold", 0.0)), 4),
+                "matched": bool(item.get("matched")),
+                "region": item.get("region_label"),
+            })
+
+        return {
+            "matched": bool(matched_record),
+            "best_template": best_record.get("template"),
+            "best_score": float(best_record.get("score", 0.0)),
+            "matched_template": matched_record.get("template") if matched_record else None,
+            "matched_score": float(matched_record.get("score", 0.0)) if matched_record else 0.0,
+            "threshold": float((matched_record or best_record).get("threshold", 0.0)),
+            "attempt_count": len(relevant),
+            "top_candidates": top_candidates,
+        }
+
+    def probe_template_match(self, template_paths, regions, threshold=0.75, timeout=0.6, interval=0.15, fast_mode=True):
+        normalized_regions = []
+        for region in regions or []:
+            if not region:
+                continue
+            try:
+                normalized = tuple(int(v) for v in region)
+            except Exception:
+                continue
+            if normalized not in normalized_regions:
+                normalized_regions.append(normalized)
+
+        if not template_paths or not normalized_regions:
+            return {
+                "matched": False,
+                "pos": None,
+                "matched_region": None,
+                "searched_regions": [],
+                "best_template": None,
+                "best_score": 0.0,
+                "matched_template": None,
+                "matched_score": 0.0,
+                "threshold": threshold,
+                "attempt_count": 0,
+                "top_candidates": [],
+            }
+
+        start_index = self.get_template_match_record_count()
+        matched_pos = None
+        matched_region = None
+        for region in normalized_regions:
+            pos = self.wait_for_any_image(
+                template_paths,
+                region=region,
+                threshold=threshold,
+                timeout=timeout,
+                interval=interval,
+                fast_mode=fast_mode,
+            )
+            if pos is not None:
+                matched_pos = pos
+                matched_region = region
+                break
+
+        records = self.get_template_match_records_since(start_index)
+        summary = self.summarize_template_match_records(template_paths, records)
+        summary["matched"] = bool(summary.get("matched") or matched_pos is not None)
+        summary["pos"] = matched_pos
+        summary["matched_region"] = list(matched_region) if matched_region else None
+        summary["searched_regions"] = [list(region) for region in normalized_regions]
+        return summary
+
+    def remember_sell_candidate_record(self, record):
+        record = dict(record)
+        record["time"] = time.strftime("%H:%M:%S")
+        self.sell_candidate_records.append(record)
+        if len(self.sell_candidate_records) > 120:
+            self.sell_candidate_records = self.sell_candidate_records[-120:]
+
+    def get_sell_candidate_signature(self, focus_region):
+        if not focus_region:
+            return "no_focus"
+        try:
+            x, y, w, h = [int(v) for v in focus_region]
+            return f"{x // 30}:{y // 30}:{w // 20}:{h // 20}"
+        except Exception:
+            return str(focus_region)
+
+    def infer_sell_card_region_from_pos(self, pos):
+        if not pos:
+            return None
+        gx, gy, gw, gh = self.regions["全界面"]
+        cx, cy = int(pos[0]), int(pos[1])
+        card_w = max(300, min(520, gw // 5))
+        card_h = max(210, min(430, gh // 4))
+        x = max(gx, min(gx + gw - card_w, cx - card_w // 2))
+        y = max(gy, min(gy + gh - card_h, cy - card_h // 2))
+        return (int(x), int(y), int(card_w), int(card_h))
+
+    def find_focused_sell_card_region_by_highlight(self):
+        try:
+            region = self.regions["全界面"]
+            screen_bgr = self.capture_region(region)
+            hsv = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2HSV)
+            lower = np.array([18, 90, 120], dtype=np.uint8)
+            upper = np.array([90, 255, 255], dtype=np.uint8)
+            mask = cv2.inRange(hsv, lower, upper)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            candidates = []
+            gx, gy, gw, gh = region
+            for contour in contours:
+                x, y, w, h = cv2.boundingRect(contour)
+                area = cv2.contourArea(contour)
+                if area < 500:
+                    continue
+                if w < 180 or w > 650 or h < 110 or h > 560:
+                    continue
+                abs_x = gx + x
+                abs_y = gy + y
+                if abs_y < gy + 180 or abs_x < gx + 250:
+                    continue
+                candidates.append((area, abs_x, abs_y, w, h))
+
+            if not candidates:
+                return None
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            _, x, y, w, h = candidates[0]
+            pad = 18
+            x = max(gx, x - pad)
+            y = max(gy, y - pad)
+            w = min(gx + gw - x, w + pad * 2)
+            h = min(gy + gh - y, h + pad * 2)
+            return (int(x), int(y), int(w), int(h))
+        except Exception as e:
+            self.log(f"删车保护：焦点高亮区域识别异常: {e}")
+            return None
+
+    def find_focused_sell_card_region(self):
+        focus_region = self.find_focused_sell_card_region_by_highlight()
+        if focus_region:
+            return focus_region
+
+        pos = self.wait_for_any_image(
+            self.get_sell_deletable_templates(),
             region=self.regions["全界面"],
-            threshold=0.70,
-            timeout=0.7,
+            threshold=0.64,
+            timeout=0.45,
             interval=0.15,
             fast_mode=True,
         )
-        if pos:
-            self.log("删车保护：当前候选车辆检测到全新标签，跳过该车。")
-            return True
-        return False
+        focus_region = self.infer_sell_card_region_from_pos(pos)
+        if focus_region:
+            return focus_region
 
-    def prepare_deletable_sell_car(self, max_fresh_skips=24):
-        for _ in range(max_fresh_skips + 1):
+        self.log("删车保护：无法定位当前焦点车辆卡片区域。")
+        return None
+
+    def get_sell_fresh_tag_search_regions(self, focus_region, aggressive=False):
+        if not focus_region:
+            return []
+
+        try:
+            x, y, w, h = [int(v) for v in focus_region]
+        except Exception:
+            return [focus_region]
+
+        regions = []
+
+        def add_region(region):
+            try:
+                normalized = tuple(int(v) for v in region)
+            except Exception:
+                return
+            if normalized[2] < 40 or normalized[3] < 30:
+                return
+            if normalized not in regions:
+                regions.append(normalized)
+
+        add_region((x, y, max(150, min(w, int(w * 0.72))), max(80, min(h, int(h * 0.42)))))
+        add_region((x, y, max(170, min(w, int(w * 0.88))), max(72, min(h, int(h * 0.30)))))
+        add_region((x, y, w, h))
+
+        if aggressive:
+            gx, gy, gw, gh = self.regions["全界面"]
+            pad_x = max(14, w // 18)
+            pad_y = max(12, h // 12)
+            ex = max(gx, x - pad_x)
+            ey = max(gy, y - pad_y)
+            ew = min(gx + gw - ex, w + pad_x * 2)
+            eh = min(gy + gh - ey, h + pad_y * 2)
+            add_region((ex, ey, ew, eh))
+
+        return regions
+
+    def selected_sell_car_is_deletable(self, focus_region):
+        if not focus_region:
+            return {
+                "matched": False,
+                "best_template": None,
+                "best_score": 0.0,
+                "matched_template": None,
+                "matched_score": 0.0,
+                "pos": None,
+                "matched_region": None,
+                "searched_regions": [],
+                "top_candidates": [],
+            }
+
+        result = self.probe_template_match(
+            self.get_sell_deletable_templates(),
+            [focus_region],
+            threshold=0.69,
+            timeout=0.65,
+            interval=0.15,
+            fast_mode=True,
+        )
+
+        self.log(
+            "删车保护：当前焦点非全新模板 "
+            f"{'命中' if result['matched'] else '未命中'}，best={result['best_score']:.3f} "
+            f"template={result['matched_template'] or result['best_template'] or '-'} region={focus_region}。"
+        )
+        return result
+
+    def selected_sell_card_has_fresh_tag_in_focus_region(self, focus_region, aggressive=False):
+        if not focus_region:
+            return {
+                "matched": False,
+                "best_template": None,
+                "best_score": 0.0,
+                "matched_template": None,
+                "matched_score": 0.0,
+                "pos": None,
+                "matched_region": None,
+                "searched_regions": [],
+                "top_candidates": [],
+                "aggressive": bool(aggressive),
+            }
+
+        threshold = 0.66 if aggressive else 0.68
+        timeout = 0.85 if aggressive else 0.60
+        result = self.probe_template_match(
+            self.get_sell_fresh_tag_templates(),
+            self.get_sell_fresh_tag_search_regions(focus_region, aggressive=aggressive),
+            threshold=threshold,
+            timeout=timeout,
+            interval=0.15,
+            fast_mode=True,
+        )
+        result["aggressive"] = bool(aggressive)
+        self.log(
+            "删车保护：当前焦点全新标签 "
+            f"{'命中' if result['matched'] else '未命中'}，best={result['best_score']:.3f} "
+            f"template={result['matched_template'] or result['best_template'] or '-'} "
+            f"mode={'aggressive' if aggressive else 'normal'} region={focus_region}。"
+        )
+        return result
+
+    def inspect_selected_sell_candidate(self, focus_region):
+        result = {
+            "decision": "skip_unconfirmed",
+            "reason": "unconfirmed_candidate",
+            "allow_delete": False,
+            "conflict": False,
+            "fresh_check": self.selected_sell_card_has_fresh_tag_in_focus_region(focus_region),
+            "fresh_verify": None,
+            "deletable_check": None,
+        }
+
+        if result["fresh_check"]["matched"]:
+            result["decision"] = "skip_fresh"
+            result["reason"] = "fresh_tag_detected"
+            return result
+
+        result["deletable_check"] = self.selected_sell_car_is_deletable(focus_region)
+        if not result["deletable_check"]["matched"]:
+            return result
+
+        result["fresh_verify"] = self.selected_sell_card_has_fresh_tag_in_focus_region(
+            focus_region,
+            aggressive=True,
+        )
+        if result["fresh_verify"]["matched"]:
+            result["decision"] = "skip_fresh_conflict"
+            result["reason"] = "fresh_tag_detected_after_deletable_match"
+            result["conflict"] = True
+            return result
+
+        result["decision"] = "allow_delete"
+        result["reason"] = "deletable_template_confirmed"
+        result["allow_delete"] = True
+        return result
+
+    def move_to_next_sell_candidate(self, signature, skip_index):
+        repeated = signature in self.sell_visited_candidate_signatures
+        self.sell_visited_candidate_signatures.add(signature)
+        if repeated or skip_index % 6 == 5:
+            self.log(f"删车保护：候选可能循环，执行 up + left 跳出当前位置 ({skip_index + 1})。")
+            self.hw_press("up", delay=0.08)
+            time.sleep(0.25)
+            self.hw_press("left", delay=0.08)
+            time.sleep(0.45)
+            return "up+left"
+
+        self.log(f"删车保护：向左跳过当前候选 ({skip_index + 1})。")
+        self.hw_press("left", delay=0.08)
+        time.sleep(0.45)
+        return "left"
+
+    def prepare_deletable_sell_car(self, max_fresh_skips=32):
+        for skip_index in range(max_fresh_skips + 1):
             if not self.is_running:
                 return False
             if not self.ensure_sell_car_grid_ready(reason="fresh_tag_guard"):
                 return False
-            if not self.selected_sell_car_has_fresh_tag():
+
+            focus_region = self.find_focused_sell_card_region()
+            signature = self.get_sell_candidate_signature(focus_region)
+            inspection = self.inspect_selected_sell_candidate(focus_region)
+            fresh_check = inspection.get("fresh_check") or {}
+            fresh_verify = inspection.get("fresh_verify") or {}
+            deletable_check = inspection.get("deletable_check") or {}
+            fresh_matched = bool(fresh_check.get("matched") or fresh_verify.get("matched"))
+            deletable_matched = bool(deletable_check.get("matched"))
+
+            self.remember_sell_candidate_record({
+                "signature": signature,
+                "focus_region": list(focus_region) if focus_region else None,
+                "deletable": deletable_matched,
+                "fresh_tag": fresh_matched,
+                "decision": inspection.get("decision"),
+                "reason": inspection.get("reason"),
+                "conflict": bool(inspection.get("conflict")),
+                "deletable_best_template": deletable_check.get("best_template"),
+                "deletable_best_score": round(float(deletable_check.get("best_score", 0.0)), 4),
+                "deletable_match_template": deletable_check.get("matched_template"),
+                "deletable_match_score": round(float(deletable_check.get("matched_score", 0.0)), 4),
+                "fresh_best_template": fresh_check.get("best_template"),
+                "fresh_best_score": round(float(fresh_check.get("best_score", 0.0)), 4),
+                "fresh_match_template": fresh_check.get("matched_template"),
+                "fresh_match_score": round(float(fresh_check.get("matched_score", 0.0)), 4),
+                "fresh_verify_best_template": fresh_verify.get("best_template"),
+                "fresh_verify_best_score": round(float(fresh_verify.get("best_score", 0.0)), 4),
+                "fresh_verify_match_template": fresh_verify.get("matched_template"),
+                "fresh_verify_match_score": round(float(fresh_verify.get("matched_score", 0.0)), 4),
+                "fresh_top_candidates": list(fresh_check.get("top_candidates", [])),
+                "deletable_top_candidates": list(deletable_check.get("top_candidates", [])),
+                "skip_index": skip_index,
+            })
+
+            if inspection.get("allow_delete"):
+                self.log("删车保护：当前焦点已通过全新标签强否决校验，并正向确认非全新，允许删除。")
                 return True
 
             self.sell_fresh_skip_count += 1
             if self.sell_fresh_skip_count > max_fresh_skips:
                 self.sell_stop_no_deletable = True
-                self.log("删车保护：连续候选车辆均带全新标签，停止删车以避免误删。")
-                self.capture_failure_snapshot("sell_only_fresh_tag_candidates", module_name="sell")
+                self.log("删车保护：连续候选无法正向确认非全新，停止删车以避免误删。")
+                self.capture_failure_snapshot(
+                    "sell_no_confirmed_deletable_candidates",
+                    module_name="sell",
+                    details={
+                        "recent_sell_candidate_records": self.sell_candidate_records[-20:],
+                        "sell_guard_summary": self.summarize_recent_sell_candidates(limit=20),
+                    },
+                )
                 return False
 
-            self.hw_press("left", delay=0.08)
-            time.sleep(0.45)
+            if inspection.get("decision") == "skip_fresh_conflict":
+                self.log("删车保护：当前焦点同时出现可删模板与全新标签，按全新车辆处理并跳过。")
+            elif fresh_matched:
+                self.log("删车保护：当前焦点检测到全新标签，跳过该车。")
+            else:
+                self.log("删车保护：当前焦点既未确认非全新，也未确认全新，跳过并继续寻找。")
+            move_used = self.move_to_next_sell_candidate(signature, skip_index)
+            self.sell_candidate_records[-1]["move"] = move_used
+
+        self.sell_stop_no_deletable = True
+        return False
 
     def click_sell_remove_option_from_action_menu(self):
         option_templates = ["RemoveFromGarageWhite.png", "RemoveFromGarageBlack.png"]
@@ -7311,6 +7763,8 @@ class FH_UltimateBot(ctk.CTk):
         ready = self.wait_for_sell_ready_after_delete()
         if ready:
             self.sell_tail_position_ready = True
+            self.sell_visited_candidate_signatures = set()
+            self.last_sell_candidate_signature = None
         return ready
 
     def sell_consumable_car(self, target_count):
@@ -7440,7 +7894,8 @@ class FH_UltimateBot(ctk.CTk):
 
             if not self.delete_one_sell_car():
                 if self.sell_stop_no_deletable:
-                    self.log("删车：未找到无全新标签的可删候选，提前结束删车模块。")
+                    self.log("删车：未找到无全新标签的可删候选，跳过当前删车步骤并准备进入下一轮大循环。")
+                    self.sell_force_next_big_loop = True
                     return True
                 return False
 
