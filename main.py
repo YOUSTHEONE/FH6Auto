@@ -59,7 +59,7 @@ CACHE_DIR = os.path.join(APP_DIR, "cache")
 TEMPLATE_CACHE_FILE = os.path.join(CACHE_DIR, "template_cache.pkl")
 TEMPLATE_META_FILE = os.path.join(CACHE_DIR, "template_meta.json")
 DIAGNOSTICS_DIR = os.path.join(APP_DIR, "diagnostics")
-CURRENT_VERSION = "1.2.1"
+CURRENT_VERSION = "1.2.2"
 APP_DISPLAY_NAME = "FH6Auto by YSTO | 深度优化 SArB1e"
 ORIGINAL_AUTHOR_NAME = "原作者 YSTO"
 OPTIMIZER_NAME = "深度优化者 SArB1e"
@@ -6340,6 +6340,62 @@ class FH_UltimateBot(ctk.CTk):
         self.log("未能退回车辆菜单")
         return False
 
+    def enter_cj_my_cars_for_normal_selection(self):
+        if self.is_cj_vehicle_page_visible():
+            self.log("超级抽奖兜底：当前已在车辆页，直接进入我的车辆列表。")
+            self.hw_press("enter")
+            time.sleep(2.0)
+            return True
+
+        if not self.recover_cj_vehicle_menu():
+            self.capture_failure_snapshot("cj_normal_selection_vehicle_menu_recover_failed", module_name="cj")
+            return False
+
+        pos_design = self.wait_for_any_image(
+            ["designandpaint_w.png", "designandpaint-b.png"],
+            region=self.regions["全界面"],
+            threshold=0.75,
+            timeout=0.8,
+            interval=0.2,
+            fast_mode=True,
+        )
+        if pos_design:
+            self.log("超级抽奖兜底：从设计与喷漆入口回到我的车辆。")
+            for _ in range(2):
+                if not self.is_running:
+                    return False
+                self.hw_press("up", delay=0.12)
+                time.sleep(0.25)
+            self.hw_press("enter", delay=0.12)
+            time.sleep(2.0)
+            return True
+
+        pos_buy_sell = self.wait_for_any_image(
+            ["buyandsell-w.png", "buyandsell-b.png"],
+            region=self.regions["全界面"],
+            threshold=0.75,
+            timeout=0.8,
+            interval=0.2,
+            fast_mode=True,
+        )
+        if pos_buy_sell:
+            self.log("超级抽奖兜底：从购买与出售入口定位我的车辆。")
+            self.hw_press("pagedown", delay=0.15)
+            time.sleep(0.8)
+            self.hw_press("enter")
+            time.sleep(2.0)
+            return True
+
+        if self.is_cj_vehicle_page_visible():
+            self.log("超级抽奖兜底：二次确认已在车辆页，进入我的车辆列表。")
+            self.hw_press("enter")
+            time.sleep(2.0)
+            return True
+
+        self.log("超级抽奖兜底：未能确认我的车辆入口位置，停止本轮普通选车。")
+        self.capture_failure_snapshot("cj_normal_selection_entry_not_found", module_name="cj")
+        return False
+
     def find_subaru_brand_simple(self, max_attempts=30, timeout=0.8):
         for _ in range(max_attempts):
             if not self.is_running:
@@ -6559,10 +6615,7 @@ class FH_UltimateBot(ctk.CTk):
         return True
 
     def select_cj_car_via_normal_flow(self):
-        self.log("进入我的车辆.")
-        self.hw_press("enter")
-        time.sleep(2.0)
-
+        self.log("超级抽奖兜底：已进入我的车辆列表，开始普通选车。")
         self.dismiss_cj_dsi_prompt()
 
         if not self.select_cj_target_car():
@@ -6695,6 +6748,8 @@ class FH_UltimateBot(ctk.CTk):
 
             if force_normal_selection:
                 self.log("本轮已切换为正常选车流程。")
+                if not self.enter_cj_my_cars_for_normal_selection():
+                    return False
                 if not self.select_cj_car_via_normal_flow():
                     if self.pipeline_next_step_override == "buy":
                         return True
@@ -6709,7 +6764,7 @@ class FH_UltimateBot(ctk.CTk):
                         force_normal_selection = True
                         self.log("设计与涂装选车已失败两次，本轮后续默认使用正常选车流程。")
 
-                    if not self.recover_cj_vehicle_menu():
+                    if not self.enter_cj_my_cars_for_normal_selection():
                         return False
 
                     used_normal_selection = True
