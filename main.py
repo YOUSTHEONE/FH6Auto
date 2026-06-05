@@ -59,7 +59,7 @@ CACHE_DIR = os.path.join(APP_DIR, "cache")
 TEMPLATE_CACHE_FILE = os.path.join(CACHE_DIR, "template_cache.pkl")
 TEMPLATE_META_FILE = os.path.join(CACHE_DIR, "template_meta.json")
 DIAGNOSTICS_DIR = os.path.join(APP_DIR, "diagnostics")
-CURRENT_VERSION = "1.2.3"
+CURRENT_VERSION = "1.2.4"
 APP_DISPLAY_NAME = "FH6Auto by YSTO | 深度优化 SArB1e"
 ORIGINAL_AUTHOR_NAME = "原作者 YSTO"
 OPTIMIZER_NAME = "深度优化者 SArB1e"
@@ -8164,9 +8164,9 @@ class FH_UltimateBot(ctk.CTk):
         self.log(f"CR兜底：买车前检测，剩余 {remaining} 辆，预计需要 {required_cr:,} CR。")
         current_cr = self.read_current_cr_value()
         if current_cr is None:
-            self.log("CR兜底：无法识别当前 CR，停止买车以避免余额不足导致流程失控。")
+            self.log("CR兜底：无法识别当前 CR，跳过余额检查继续买车（与 v1.1.0 行为一致）。")
             self.capture_failure_snapshot("cr_shortfall_current_cr_unreadable", module_name="buy")
-            return False
+            return True
 
         if current_cr >= required_cr:
             self.log(f"CR兜底：当前 {current_cr:,} CR，已足够完成本轮买车。")
