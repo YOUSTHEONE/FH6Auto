@@ -409,6 +409,7 @@ class FH_UltimateBot(ctk.CTk):
             "general_click_wait_multiplier": 1.0,
             "general_vehicle_move_wait_seconds": 0.08,
             "filter_strict_click_verify": False,
+            "winter_snow_tire_filter_optimization": False,
             "sell_fast_delete_without_template_check": False,
             "like_guard_enabled": True,
             "like_guard_stall_seconds": 180,
@@ -601,6 +602,10 @@ class FH_UltimateBot(ctk.CTk):
             self.config["step_retry_enabled"] = bool(self.var_step_retry_enabled.get())
         if hasattr(self, "var_filter_strict_click_verify"):
             self.config["filter_strict_click_verify"] = bool(self.var_filter_strict_click_verify.get())
+        if hasattr(self, "var_winter_snow_tire_filter_optimization"):
+            self.config["winter_snow_tire_filter_optimization"] = bool(
+                self.var_winter_snow_tire_filter_optimization.get()
+            )
         if hasattr(self, "var_sell_fast_delete_without_template_check"):
             self.config["sell_fast_delete_without_template_check"] = bool(
                 self.var_sell_fast_delete_without_template_check.get()
@@ -2036,6 +2041,16 @@ class FH_UltimateBot(ctk.CTk):
             command=self.save_config,
         )
         self.cb_skip_startup_prompts.pack(side="right", padx=(8, 0))
+        self.var_winter_snow_tire_filter_optimization = ctk.BooleanVar(
+            value=bool(self.config.get("winter_snow_tire_filter_optimization", False))
+        )
+        self.cb_winter_snow_tire_filter_optimization = ctk.CTkCheckBox(
+            self.pipeline_tip_frame,
+            text="冬季雪地胎筛选优化",
+            variable=self.var_winter_snow_tire_filter_optimization,
+            command=self.save_config,
+        )
+        self.cb_winter_snow_tire_filter_optimization.pack(side="right", padx=(8, 0))
         self.entry_like_guard_stall_seconds = ctk.CTkEntry(self.pipeline_tip_frame, width=54, height=24, justify="center")
         self.entry_like_guard_stall_seconds.insert(0, str(self.config.get("like_guard_stall_seconds", 180)))
         self.entry_like_guard_stall_seconds.pack(side="right", padx=(4, 0))
@@ -7035,6 +7050,15 @@ class FH_UltimateBot(ctk.CTk):
                 pass
         return bool(self.config.get("filter_strict_click_verify", False))
 
+    def is_winter_snow_tire_filter_optimization_enabled(self):
+        var_widget = getattr(self, "var_winter_snow_tire_filter_optimization", None)
+        if var_widget is not None:
+            try:
+                return bool(var_widget.get())
+            except Exception:
+                pass
+        return bool(self.config.get("winter_snow_tire_filter_optimization", False))
+
     def ensure_filter_option_checked_by_templates(self, label, row_templates, log_prefix="筛选"):
         strict_verify = self.is_filter_strict_click_verify_enabled()
         find_timeout = 3.0 if strict_verify else 0.9
@@ -7120,7 +7144,11 @@ class FH_UltimateBot(ctk.CTk):
         self.log(f"{log_prefix}：按固定键序列勾选重复项+B级。")
         self.hw_press("home", delay=0.08)
         time.sleep(0.15)
-        for _ in range(2):
+        duplicate_down_count = 2
+        if self.is_winter_snow_tire_filter_optimization_enabled():
+            duplicate_down_count += 2
+            self.log(f"{log_prefix}：冬季雪地胎筛选优化已启用，重复项定位额外下移2格。")
+        for _ in range(duplicate_down_count):
             if not self.is_running:
                 return False
             self.hw_press("down", delay=0.06)
