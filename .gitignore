@@ -4,6 +4,7 @@
 bot_config.json
 bot_log.txt
 *.ahk
+*copy*.py
 
 # ========================
 # 2. 打包产物、缓存和诊断文件
@@ -17,6 +18,9 @@ other/
 __pycache__/
 diagnostics/
 savedist/
+oldversion/
+bk/
+debug/
 
 # ========================
 # 3. 仓库保留内容说明

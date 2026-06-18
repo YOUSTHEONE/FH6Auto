@@ -1,0 +1,67 @@
+{
+    "menu_anchor": {
+        "zh": ["收集簿"],
+        "en": ["collection"]
+    },
+    "exit_btn": {
+        "zh": ["退出", "返回"],
+        "en": ["exit", "back"]
+    },
+    "exit_event": {
+        "zh": ["退出比赛"],
+        "en": ["exit event"]
+    },
+    "eventlab": ["eventlab"],
+    "play_event": {
+        "zh": ["游玩赛事", "遊玩賽事"],
+        "en": ["play event", "play events"]
+    },
+    "view_event_info": {
+        "zh": ["查看赛事信息", "查看賽事信息"],
+        "en": ["view event info"]
+    },
+    "start_event": {
+        "zh": ["开始竞赛赛事", "開始賽事"],
+        "en": ["start event", "start race"]
+    },
+    "restart": {
+        "zh": ["重新开始", "重新開始"],
+        "en": ["restart"]
+    },
+    "buy_new_and_used": {
+        "zh": ["购买新车", "新车", "二手车"],
+        "en": ["buy new", "used cars"]
+    },
+    "buy_and_sell": {
+        "zh": ["购买与出售", "購買與出售"],
+        "en": ["buy & sell", "buy and sell"]
+    },
+    "choose_car": {
+        "zh": ["选择车辆", "選擇車輛"],
+        "en": ["choose car"]
+    },
+    "car_mastery": {
+        "zh": ["车辆熟练度", "車輛熟練度"],
+        "en": ["car mastery"]
+    },
+    "upgrades_and_tuning": {
+        "zh": ["升级与调校", "升級與調校"],
+        "en": ["upgrades & tuning", "upgrades and tuning"]
+    },
+    "not_enough_sp": {
+        "zh": ["不够", "额外加成", "不足"],
+        "en": ["not enough", "perk"]
+    },
+    "get_in_car": {
+        "zh": ["上车", "上車", "驾驶"],
+        "en": ["get in car", "drive"]
+    },
+    "continue_btn": {
+        "zh": ["继续", "繼續"],
+        "en": ["continue"]
+    },
+    "dont_show_again": {
+        "zh": ["不再显示该消息", "不再顯示該消息"],
+        "en": ["don't show this again", "dont show"]
+    }
+}

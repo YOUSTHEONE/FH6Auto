@@ -1,0 +1,29 @@
+{
+    "race_count": 99,
+    "buy_count": 33,
+    "cj_count": 33,
+    "sc_count": 33,
+    "chk_1": true,
+    "chk_2": true,
+    "chk_3": true,
+    "chk_4": true,
+    "next_1": 2,
+    "next_2": 3,
+    "next_3": 4,
+    "next_4": 1,
+    "global_loops": 10,
+    "skill_dirs": [
+        "right",
+        "up",
+        "up",
+        "up",
+        "left"
+    ],
+    "share_code": "890169683",
+    "auto_restart": false,
+    "restart_cmd": "start steam://run/2483190",
+    "calc_a": "1000000",
+    "calc_b": "81700",
+    "calc_c": "30",
+    "sell_mode": 1
+}
