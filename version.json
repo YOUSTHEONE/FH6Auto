@@ -1,4 +1,7 @@
 {
-    "version": "1.1.7.1",
-    "url": "https://github.com/YOUSTHEONE/FH6Auto/releases/latest"
+    "version": "1.2.4",
+    "url": "https://github.com/CaiSF25/FH6Auto-Fork/releases/latest",
+    "project_url": "https://github.com/CaiSF25/FH6Auto-Fork",
+    "upstream_url": "https://github.com/YOUSTHEONE/FH6Auto",
+    "manifest_url": "https://raw.githubusercontent.com/CaiSF25/FH6Auto-Fork/refs/heads/main/version.json"
 }
