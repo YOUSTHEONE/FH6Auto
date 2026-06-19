@@ -91,7 +91,7 @@ TEMPLATE_CACHE_FILE = os.path.join(CACHE_DIR, "template_cache.pkl")
 TEMPLATE_META_FILE = os.path.join(CACHE_DIR, "template_meta.json")
 DEFAULT_CURRENT_VERSION = "1.0"
 APP_DISPLAY_NAME = "FH6Auto Fork"
-APP_ATTRIBUTION = "Based on YOUSTHEONE & As7tesia & CaiSF25 /FH6Auto"
+APP_ATTRIBUTION = "Based on YOUSTHEONE & As7tesia & CaiSF25"
 DEFAULT_UPSTREAM_REPO_URL = "https://github.com/YOUSTHEONE/FH6Auto"
 DEFAULT_PROJECT_REPO_URL = "https://github.com/kenny9487/FH6Auto"
 DEFAULT_UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/CaiSF25/FH6Auto-Fork/refs/heads/main/version.json"
@@ -1151,7 +1151,7 @@ class FH_UltimateBot(ctk.CTk):
 
         ctk.CTkLabel(
             self.support_win,
-            text=f"v{CURRENT_VERSION}",
+            text=f"原作者 YSTO / 繁體優化者 kenny9487",
             font=ctk.CTkFont(family="微軟正黑體", size=13, weight="bold"),
         ).pack(pady=4)
 
@@ -1173,7 +1173,7 @@ class FH_UltimateBot(ctk.CTk):
 
         self.lbl_version = ctk.CTkLabel(
             self.support_win,
-            text=f"當前版本: v{CURRENT_VERSION}",
+            text=f"FH6Auto by YSTO | kenny9487 繁體優化版 | 當前版本: v{CURRENT_VERSION}",
             text_color="gray",
             font=ctk.CTkFont(family="微軟正黑體", size=12),
         )
@@ -1182,7 +1182,7 @@ class FH_UltimateBot(ctk.CTk):
         def check_update_logic():
             self.ui_call(self.lbl_version.configure, text="正在連接 Github...", text_color="#3498DB")
             try:
-                url = "https://raw.githubusercontent.com/YOUSTHEONE/FH6Auto/refs/heads/main/version.json"
+                url = "https://raw.githubusercontent.com/kenny9487/FH6Auto/refs/heads/main/version.json"
                 resp = requests.get(url, timeout=5)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -1190,7 +1190,7 @@ class FH_UltimateBot(ctk.CTk):
                     remote_url = data.get("url", "")
 
                     if parse_version(remote_ver) > parse_version(CURRENT_VERSION):
-                        if remote_url.startswith("https://github.com/YOUSTHEONE/") or remote_url.startswith("https://ifdian.net/"):
+                        if remote_url.startswith("https://github.com/kenny9487/") or remote_url.startswith("https://ifdian.net/"):
                             self.ui_call(
                                 self.lbl_version.configure,
                                 text=f"發現新版本 v{remote_ver}，已打開流覽器！",
