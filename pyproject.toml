@@ -1,0 +1,24 @@
+[project]
+name = "fh6auto"
+version = "0.1.0"
+description = "Gacha Auto"
+requires-python = ">=3.13"
+readme = "README.md"
+dependencies = [
+    # GUI
+    "customtkinter>=5.0.0",
+    
+    # 图像处理与计算机视觉
+    "opencv-python>=4.8.0.0",
+    "numpy>=1.21.0",
+    "Pillow>=8.0.0",
+    
+    # 自动化控制
+    "pyautogui>=0.9.53",
+    "pydirectinput>=1.0.0",
+    "pynput>=1.7.6",
+    
+    # 系统与网络
+    "requests>=2.25.0",
+    "pywin32>=227; sys_platform=='win32'"
+]
