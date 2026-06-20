@@ -2145,8 +2145,8 @@ class FH_UltimateBot(ctk.CTk):
         )
     def enter_menu(self):
         self.log("正在嘗試進入主菜單...")
-        # 連續嘗試 60 次，大概花費 40~60 秒
-        for i in range(60):
+        # 連續嘗試 30 次，大概花費 15~30 秒
+        for i in range(30):
             if not self.is_running:
                 return False
                 
@@ -2154,16 +2154,16 @@ class FH_UltimateBot(ctk.CTk):
             pos_menu = self.find_image_gray("collectionjournal.png", region=self.regions["左"], threshold=0.70, fast_mode=True)
             
             if pos_menu:
-                self.log(f"成功定位到菜單錨點！({i + 1}/60)")
+                self.log(f"成功定位到菜單錨點！({i + 1}/30)")
                 time.sleep(0.5)
                 return True
                 
-            self.log(f"未在主菜單... ({i + 1}/60)")
+            self.log(f"未在主菜單... ({i + 1}/30)")
             self.hw_press("esc")
             # 給遊戲一點動畫載入時間
             time.sleep(1.0)
             
-        self.log("60 次嘗試均未進入功能表，請檢查遊戲狀態。")
+        self.log("30 次嘗試均未進入功能表，請檢查遊戲狀態。")
         return False
     def advanced_enter_menu(self):
         """
@@ -2188,8 +2188,8 @@ class FH_UltimateBot(ctk.CTk):
         
         if not dynamic_obstacles:
             self.log("提示：images/obstacles/ 資料夾為空或不存在，將只使用 ESC 退回。")
-        # 連續嘗試 80 次，處理較長的隨機過程
-        for i in range(80):
+        # 連續嘗試 40 次，處理較長的隨機過程
+        for i in range(40):
             if hasattr(self, "check_pause"): self.check_pause() # 相容暫停功能
             if not self.is_running:
                 return False
@@ -2228,12 +2228,17 @@ class FH_UltimateBot(ctk.CTk):
                 time.sleep(1.5) # 給畫面跳轉留出動畫時間
                 continue # 點擊後，跳過本輪，不要按 ESC
                 
-            # 4. 如果既沒進功能表，也沒看到特定的圖片，說明處於常規介面，按 ESC 退回
-            self.log(f"未在主功能表且無已知特定圖片，按下 ESC... ({i + 1}/80)")
-            self.hw_press("esc")
-            time.sleep(1.2) # 給遊戲一點動畫載入時間
+            # 4. 如果既沒進功能表，也沒看到特定的圖片，說明處於常規介面，按 ESC 退回，並定期按 Enter 盲解強制彈窗
+            if (i + 1) % 10 == 0:
+                self.log(f"已連續嘗試 {i + 1} 次仍卡住，嘗試按下 Enter 解除強制確認彈窗...")
+                self.hw_press("enter")
+                time.sleep(1.5)
+            else:
+                self.log(f"未在主選單且無已知特定圖片，按下 ESC... ({i + 1}/40)")
+                self.hw_press("esc")
+                time.sleep(1.2) # 給遊戲一點動畫載入時間
             
-        self.log("80 次動態嘗試均未進入功能表，高級退回失敗。")
+        self.log("40 次動態嘗試均未進入功能表，高級退回失敗。")
         return False
     # ==========================================
     # --- 圖像尋找 ---
@@ -3847,32 +3852,50 @@ class FH_UltimateBot(ctk.CTk):
         self.hw_press("enter")
         time.sleep(2.0)
 
-        pos_target = self.wait_for_image_with_element_multi(
-            IMG_SKILL_CAR,
-            IMG_LIKE_TAG,
-            region=self.regions["全介面"],
-            fast_mode=True,
-            main_threshold=0.7,
-            like_threshold=0.7,
-            final_threshold=0.7,
-            timeout=1.2,
-            interval=0.2,
-            ignore_top_text=True
-        )
-        if pos_target:
-            self.detail_state_confirmed = True
-        
-        # 如果沒找到，且之前從未確認過狀態，則按下 P 鍵再找一次
-        if not pos_target and not self.detail_state_confirmed:
-            self.log("當前頁面未找到車輛，嘗試按 P 切換詳情狀態...")
-            self.hw_press("p")
-            time.sleep(0.6)
-            
+        # 1. 先按 Y 篩選【已收藏】車輛
+        self.log("進入我的車輛後，先按 Y 篩選【已收藏】車輛...")
+        self.hw_press("y")
+        time.sleep(1.0)
+        self.hw_press("enter")
+        time.sleep(1.0)
+        self.hw_press("esc")
+        time.sleep(1.2)
+
+        # 2. 再按 Backspace 篩選車廠
+        self.log("按 Backspace 篩選車廠...")
+        self.hw_press("backspace")
+        time.sleep(1.2)
+
+        found_brand = False
+        for _ in range(5):
+            if not self.is_running:
+                return False
+
+            pos_brand = self.wait_for_image_gray("skillcarbrand.png", region=self.regions["全介面"], threshold=0.8, timeout=1.2, interval=0.2, fast_mode=True)
+            if pos_brand:
+                self.game_click(pos_brand)
+                time.sleep(1.2)
+                found_brand = True
+                break
+
+            self.hw_press("up")
+            time.sleep(0.4)
+
+        if not found_brand:
+            self.log("5次嘗試未找到刷圖車輛品牌。")
+            return False
+
+        # 3. 進入品牌後，尋找目標車輛
+        pos_target = None
+        for _ in range(20):
+            if not self.is_running:
+                return False
+
             pos_target = self.wait_for_image_with_element_multi(
                 IMG_SKILL_CAR,
                 IMG_LIKE_TAG,
                 region=self.regions["全介面"],
-                main_threshold=0.7,
+                main_threshold=0.75,
                 like_threshold=0.7,
                 final_threshold=0.7,
                 timeout=1.2,
@@ -3880,36 +3903,17 @@ class FH_UltimateBot(ctk.CTk):
                 fast_mode=True,
                 ignore_top_text=True 
             )
+            
+            # 如果找到了，永久鎖定詳情狀態為正確
             if pos_target:
                 self.detail_state_confirmed = True
-        if not pos_target:
-            self.log("未找到帶 liketag 的目標車輛，重新選品牌...")
-            self.hw_press("backspace")
-            time.sleep(1.2)
-
-            found_brand = False
-            for _ in range(5):
-                if not self.is_running:
-                    return False
-
-                pos_brand = self.wait_for_image_gray("skillcarbrand.png", region=self.regions["全介面"], threshold=0.8, timeout=1.2, interval=0.2, fast_mode=True)
-                if pos_brand:
-                    self.game_click(pos_brand)
-                    time.sleep(1.2)
-                    found_brand = True
-                    break
-
-                self.hw_press("up")
-                time.sleep(0.4)
-
-            if not found_brand:
-                self.log("5次嘗試未找到刷圖車輛品牌。")
-                return False
-
-            for _ in range(20):
-                if not self.is_running:
-                    return False
-
+            
+            # 如果沒找到，且之前從未確認過狀態，則按下 P 鍵再找一次
+            if not pos_target and not self.detail_state_confirmed:
+                self.log("當前頁面未找到車輛，嘗試按 P 切換詳情狀態...")
+                self.hw_press("p")
+                time.sleep(0.6)
+                
                 pos_target = self.wait_for_image_with_element_multi(
                     IMG_SKILL_CAR,
                     IMG_LIKE_TAG,
@@ -3919,38 +3923,19 @@ class FH_UltimateBot(ctk.CTk):
                     final_threshold=0.7,
                     timeout=1.2,
                     interval=0.2,
-                    fast_mode=True
+                    fast_mode=True,
+                    ignore_top_text=True
                 )
-                
-                # 如果找到了，永久鎖定詳情狀態為正確
                 if pos_target:
                     self.detail_state_confirmed = True
+            if pos_target:
+                break
                 
-                # 如果沒找到，且之前從未確認過狀態，則按下 P 鍵再找一次
-                if not pos_target and not self.detail_state_confirmed:
-                    self.log("當前頁面未找到車輛，嘗試按 P 切換詳情狀態...")
-                    self.hw_press("p")
-                    time.sleep(0.6)
-                    
-                    pos_target = self.wait_for_image_with_element_multi(
-                        IMG_SKILL_CAR,
-                        IMG_LIKE_TAG,
-                        region=self.regions["全介面"],
-                        main_threshold=0.75,
-                        like_threshold=0.7,
-                        final_threshold=0.7,
-                        timeout=1.2,
-                        interval=0.2,
-                        fast_mode=True
-                    )
-                    if pos_target:
-                        self.detail_state_confirmed = True
-                if pos_target:
-                    break
-                for _ in range(4):
-                    self.hw_press("right", delay=0.08)
-                    time.sleep(0.08)
-                time.sleep(0.4)
+            # 翻頁
+            for _ in range(4):
+                self.hw_press("right", delay=0.08)
+                time.sleep(0.08)
+            time.sleep(0.4)
 
         if not pos_target:
             self.log("翻頁未能找到帶有收藏的刷圖車輛！")
@@ -4366,7 +4351,7 @@ class FH_UltimateBot(ctk.CTk):
                 self.log(f"快速跳過前 {jump_pages} 頁...")
                 for _ in range(jump_pages):
                     if not self.is_running: return False
-                    for _ in range(4):
+                    for _ in range(3):
                         self.hw_press("right", delay=0.06)
                         time.sleep(0.1)
                     time.sleep(0.15) # 給一點點動畫緩衝時間
@@ -4420,7 +4405,7 @@ class FH_UltimateBot(ctk.CTk):
                     break
                     
                 # 翻下一頁
-                for _ in range(4):
+                for _ in range(3):
                     self.hw_press("right", delay=0.06)
                     time.sleep(0.1)
                 time.sleep(0.4)
@@ -4716,16 +4701,35 @@ class FH_UltimateBot(ctk.CTk):
         self.hw_press("pagedown", delay=0.15)
         time.sleep(1.0)
 
+        # === 修改後的篩選流程 ===
         self.hw_press("enter")  # 進入我的車輛
         time.sleep(2.0)
-        #選擇一輛收藏
-        self.hw_press("y") 
+        
+        # 1. 篩選【已收藏】車輛
+        self.log("篩選【已收藏】車輛...")
+        self.hw_press("y")
         time.sleep(1.0)
         self.hw_press("enter")
         time.sleep(0.8)
-        self.hw_press("esc") 
+        self.hw_press("esc")
         time.sleep(1.5)
-        #駕駛收藏的車
+        
+        # 2. 按 Backspace 進入製造商列表並選取車廠
+        self.log("按 Backspace 篩選車廠...")
+        self.hw_press("backspace")
+        time.sleep(1.2)
+        
+        # 嘗試點擊品牌圖標 (CCCbrand.png, CCbrand-b.png)
+        brand_pos = self.wait_for_image_gray("CCbrand.png", "CCbrand-b.png", region=self.regions["全介面"], threshold=0.75, timeout=3.0, interval=0.2)
+        if brand_pos:
+            self.game_click(brand_pos)
+            time.sleep(1.0)
+            self.hw_press("enter") # 確認選取該品牌
+            time.sleep(0.8)
+        else:
+            self.log("未找到品牌標籤，跳過品牌篩選...")
+            
+        # 3. 駕駛收藏的車
         self.hw_press("enter")
         time.sleep(0.8)
         self.move_to_game_coord(5, 5)
