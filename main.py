@@ -2071,26 +2071,88 @@ class FH_UltimateBot(ctk.CTk):
             threshold=0.70,
             fast_mode=True
         )
+
+    def get_obstacle_image_list(self):
+        """读取 images/obstacles/ 下所有弹窗模板（优先程序目录绝对路径）。"""
+        obstacles_dir = os.path.join(APP_DIR, "images", "obstacles")
+        dynamic_obstacles = []
+        if os.path.isdir(obstacles_dir):
+            for file in os.listdir(obstacles_dir):
+                if file.lower().endswith((".png", ".jpg", ".jpeg")):
+                    dynamic_obstacles.append(f"obstacles/{file}")
+        return dynamic_obstacles
+
+    def dismiss_rate_event_popup(self):
+        """
+        关闭 EventLab 跑图结束后可能出现的「评价赛事」弹窗，点击「取消」。
+        需准备模板: images/rateevent.png（标题栏）或 images/rateevent_cancel.png（取消按钮）。
+        取消按钮默认高亮时，识图失败也会尝试按 Enter。
+        """
+        pos_title = self.find_any_image_gray(
+            ["rateevent.png", "obstacles/rateevent.png"],
+            region=self.regions["中间"],
+            threshold=0.68,
+            fast_mode=True,
+        )
+        pos_cancel = self.find_any_image_gray(
+            ["rateevent_cancel.png", "obstacles/rateevent_cancel.png"],
+            region=self.regions["中间"],
+            threshold=0.68,
+            fast_mode=True,
+        )
+        if not pos_title and not pos_cancel:
+            return False
+
+        self.log("检测到「评价赛事」弹窗，点击取消...")
+        if pos_cancel:
+            self.game_click(pos_cancel)
+        else:
+            # 取消按钮通常为默认选中项，Enter 等效于点取消
+            self.hw_press("enter")
+        time.sleep(1.0)
+        return True
+
+    def dismiss_known_popups(self):
+        """进菜单前处理已知弹窗：评价赛事 + images/obstacles/ 自定义模板。"""
+        if self.dismiss_rate_event_popup():
+            return True
+
+        dynamic_obstacles = self.get_obstacle_image_list()
+        if not dynamic_obstacles:
+            return False
+
+        pos_obs = self.find_any_image_gray(
+            dynamic_obstacles,
+            region=self.regions["全界面"],
+            threshold=0.75,
+            fast_mode=True,
+        )
+        if pos_obs:
+            self.log("检测到已知弹窗/障碍图，点击关闭...")
+            self.game_click(pos_obs)
+            time.sleep(1.5)
+            return True
+        return False
+
     def enter_menu(self):
         self.log("正在尝试进入主菜单...")
         # 连续尝试 60 次，大概花费 40~60 秒
         for i in range(60):
             if not self.is_running:
                 return False
-                
 
-            pos_menu = self.find_image_gray("collectionjournal.png", region=self.regions["左"], threshold=0.70, fast_mode=True)
-            
-            if pos_menu:
+            if self.is_in_menu():
                 self.log(f"成功定位到菜单锚点！({i + 1}/60)")
                 time.sleep(0.5)
                 return True
-                
+
+            if self.dismiss_known_popups():
+                continue
+
             self.log(f"未在主菜单... ({i + 1}/60)")
             self.hw_press("esc")
-            # 给游戏一点动画加载时间
             time.sleep(1.0)
-            
+
         self.log("60 次尝试均未进入菜单，请检查游戏状态。")
         return False
     def advanced_enter_menu(self):
@@ -2100,20 +2162,7 @@ class FH_UltimateBot(ctk.CTk):
         """
         self.log("正在使用【高级恢复模式】尝试退回主菜单...")
         
-        # ==========================================
-        # 动态读取 images/obstacles/ 里的所有图片
-        # ==========================================
-        obstacles_dir = os.path.join("images", "obstacles")
-        dynamic_obstacles = []
-        
-        # 检查文件夹是否存在
-        if os.path.exists(obstacles_dir):
-            for file in os.listdir(obstacles_dir):
-                # 只要是 png 或 jpg 格式的图片，统统加进来
-                if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    # 拼成 "obstacles/文件名.png"，这样 find_any_image_gray 就能正确找到路径
-                    dynamic_obstacles.append(f"obstacles/{file}")
-        
+        dynamic_obstacles = self.get_obstacle_image_list()
         if not dynamic_obstacles:
             self.log("提示：images/obstacles/ 文件夹为空或不存在，将只使用 ESC 退回。")
         # 连续尝试 80 次，处理较长的随机过程
@@ -2148,15 +2197,19 @@ class FH_UltimateBot(ctk.CTk):
                 self.log("10 分钟冷却完毕，交给外层执行重启流程。")
                 return False
 
-            # 3. 动态扫描所有可能的弹窗 / 需要点击的中间图片
+            # 3. 「评价赛事」弹窗（跑图结束后常见）
+            if self.dismiss_rate_event_popup():
+                continue
+
+            # 4. 动态扫描 images/obstacles/ 里的弹窗模板
             pos_obs = self.find_any_image_gray(dynamic_obstacles, region=self.regions["全界面"], threshold=0.75, fast_mode=True)
             if pos_obs:
                 self.log(f"退回途中检测到已知图片/弹窗，点击推进... ({i+1}/80)")
                 self.game_click(pos_obs)
-                time.sleep(1.5) # 给画面跳转留出动画时间
-                continue # 点击后，跳过本轮，不要按 ESC
+                time.sleep(1.5)
+                continue
                 
-            # 4. 如果既没进菜单，也没看到特定的图片，说明处于常规界面，按 ESC 退回
+            # 5. 如果既没进菜单，也没看到特定的图片，说明处于常规界面，按 ESC 退回
             self.log(f"未在主菜单且无已知特定图片，按下 ESC... ({i + 1}/80)")
             self.hw_press("esc")
             time.sleep(1.2) # 给游戏一点动画加载时间
@@ -3979,6 +4032,8 @@ class FH_UltimateBot(ctk.CTk):
                     if pos_like:
                         self.log("识别到点赞作界面，执行回车确认！")
                         self.hw_press("enter")
+                    elif self.dismiss_rate_event_popup():
+                        pass
                     last_like_chk = now
                 
                 # 每1秒检测一次重新开始(正常完赛)
@@ -4033,6 +4088,14 @@ class FH_UltimateBot(ctk.CTk):
 
             self.race_counter += 1
             self.update_running_ui("循环跑图", self.race_counter, target_count)
+
+        # 全部跑图完成后，关闭可能出现的「评价赛事」弹窗
+        for _ in range(5):
+            if not self.is_running:
+                return False
+            if not self.dismiss_rate_event_popup():
+                break
+            time.sleep(0.8)
 
         return True
 
