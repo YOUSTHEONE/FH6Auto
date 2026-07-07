@@ -7,6 +7,9 @@
 > 因使用本工具造成的任何后果（包括但不限于封号、异常、损失等），由使用者自行承担。
 
 ---
+深度优化者：SArB1e
+深度优化者 GitHub：https://github.com/HikigayaHachiman0211
+深度优化者爱发电：https://afdian.com/a/SArB1e
 
 ## 项目简介
 
