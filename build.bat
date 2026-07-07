@@ -4,12 +4,12 @@ setlocal
 
 cd /d "%~dp0"
 
-set APP_NAME=FH6Auto
+set APP_NAME=FH6AutoStableVersion By SArB1e
 set MAIN_FILE=main.py
 
 echo.
 echo ==============================
-echo 开始打包 %APP_NAME%
+echo 开始打包 %APP_NAME% by YSTO ^| Deep Optimized by SArB1e
 echo ==============================
 echo.
 
